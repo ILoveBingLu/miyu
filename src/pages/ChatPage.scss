@@ -254,16 +254,38 @@
         border-bottom: 1px solid var(--border-color);
         -webkit-app-region: drag;
         backdrop-filter: blur(10px);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+
+        .update-indicator-header {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 4px 10px;
+          background: rgba(var(--primary-rgb), 0.1);
+          color: var(--primary);
+          border-radius: 99px;
+          font-size: 12px;
+          font-weight: 500;
+
+          .spin {
+            animation: spin 1s linear infinite;
+          }
+        }
 
         .session-avatar {
           width: 36px;
           height: 36px;
           border-radius: 50%;
           -webkit-app-region: no-drag;
+          object-fit: cover;
         }
 
         .header-info {
           -webkit-app-region: no-drag;
+          flex: 1;
+          min-width: 0;
 
           h3 {
             font-size: 15px;
@@ -848,7 +870,7 @@
   width: 48px;
   height: 48px;
   border-radius: 8px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: var(--bg-tertiary);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -872,22 +894,42 @@
     color: white;
     font-size: 18px;
     font-weight: 600;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .avatar-skeleton {
     position: absolute;
     inset: 0;
-    background: var(--bg-tertiary);
-    animation: pulse 1.5s infinite;
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.05) 25%, rgba(255, 255, 255, 0.15) 50%, rgba(255, 255, 255, 0.05) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: inherit;
   }
 
-  &.group {
+  @keyframes shimmer {
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
+  }
+
+  &.group .avatar-letter {
     background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
   }
 
   &.loading {
     background: var(--bg-tertiary);
-    animation: pulse 1.5s infinite;
+    
+    .avatar-skeleton {
+      z-index: 1;
+    }
   }
 }
 
@@ -1127,10 +1169,24 @@
   }
 }
 
+@keyframes message-entry {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 // 消息包裹器 - 控制整行对齐
 .message-wrapper {
   display: flex;
   flex-direction: column;
+  animation: message-entry 0.35s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  will-change: transform, opacity;
 
   &.sent {
     align-items: flex-end;
@@ -1142,6 +1198,7 @@
 
   &.system {
     align-items: center;
+    animation: fadeIn 0.5s ease-out both; // 系统消息使用简单的淡入
   }
 }
 
@@ -1228,6 +1285,7 @@
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  position: relative;
 
   img {
     width: 100%;
@@ -1239,6 +1297,22 @@
     font-size: 14px;
     font-weight: 600;
     color: white;
+  }
+  
+  .avatar-skeleton-wrapper {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    background: var(--bg-tertiary);
+    
+    .avatar-skeleton {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, rgba(255, 255, 255, 0.05) 25%, rgba(255, 255, 255, 0.15) 50%, rgba(255, 255, 255, 0.05) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: inherit;
+    }
   }
 }
 
@@ -1570,10 +1644,69 @@
   }
 }
 
+// 转账消息卡片
+.transfer-message {
+  width: 240px;
+  background: linear-gradient(135deg, #f59e42 0%, #f5a742 100%);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  cursor: default;
+
+  &.received {
+    background: linear-gradient(135deg, #b8b8b8 0%, #a8a8a8 100%);
+  }
+
+  .transfer-icon {
+    flex-shrink: 0;
+    
+    svg {
+      width: 32px;
+      height: 32px;
+      filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
+    }
+  }
+
+  .transfer-info {
+    flex: 1;
+    color: white;
+
+    .transfer-amount {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 2px;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    }
+
+    .transfer-memo {
+      font-size: 13px;
+      margin-bottom: 8px;
+      opacity: 0.95;
+    }
+
+    .transfer-label {
+      font-size: 12px;
+      opacity: 0.85;
+    }
+  }
+}
+
 .sender-name {
   font-size: 12px;
   color: var(--text-tertiary);
   margin-bottom: 4px;
+  
+  .sender-skeleton {
+    display: inline-block;
+    width: 60px;
+    height: 14px;
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.05) 25%, rgba(255, 255, 255, 0.15) 50%, rgba(255, 255, 255, 0.05) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 4px;
+  }
 }
 
 // 引用消息样式
@@ -2071,16 +2204,41 @@
   justify-content: center;
   gap: 8px;
   background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
-  color: var(--text-quaternary);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover {
+    background: var(--bg-hover);
+    border-color: var(--primary);
+
+    svg {
+      opacity: 0.8;
+      color: var(--primary);
+    }
+
+    .video-action {
+      opacity: 1;
+      color: var(--primary);
+    }
+  }
 
   svg {
     opacity: 0.5;
+    transition: all 0.2s;
   }
 
   span {
     font-size: 12px;
     opacity: 0.8;
+  }
+
+  .video-action {
+    font-size: 11px;
+    opacity: 0.6;
+    transition: all 0.2s;
   }
 }
 

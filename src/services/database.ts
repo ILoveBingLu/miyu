@@ -94,7 +94,8 @@ export async function getMessages(
     rawContent: String(row.message_content || row.compress_content || ''),
     imageMd5: extractImageMd5(row),
     emojiCdnUrl: extractEmojiCdnUrl(row),
-    voiceDurationSeconds: extractVoiceDuration(row)
+    voiceDurationSeconds: extractVoiceDuration(row),
+    sortSeq: Number(row.sort_seq || 0)
   }))
 }
 
@@ -235,6 +236,7 @@ export async function searchMessages(
     createTime: Number(row.create_time || 0),
     isSend: row.is_send != null ? Number(row.is_send) : null,
     senderUsername: row.sender_username ? String(row.sender_username) : null,
-    parsedContent: parseMessageContent(row)
+    parsedContent: parseMessageContent(row),
+    sortSeq: Number(row.sort_seq || 0)
   }))
 }

@@ -37,6 +37,9 @@
   
   // 卡片背景
   --card-bg: rgba(255, 255, 255, 0.7);
+  
+  // Logo 颜色反转（浅色主题用 0，深色主题用 1）
+  --logo-invert: 0;
 }
 
 // ==================== 浅色主题 ====================
@@ -58,6 +61,7 @@
   --bg-gradient: linear-gradient(135deg, #F0EEE9 0%, #E8E6E1 100%);
   --primary-gradient: linear-gradient(135deg, #8B7355 0%, #A68B5B 100%);
   --card-bg: rgba(255, 255, 255, 0.7);
+  --logo-invert: 0;
 }
 
 // 刚玉蓝主题
@@ -77,6 +81,7 @@
   --bg-gradient: linear-gradient(135deg, #E8EEF0 0%, #D8E4E8 100%);
   --primary-gradient: linear-gradient(135deg, #4A6670 0%, #5A7A86 100%);
   --card-bg: rgba(255, 255, 255, 0.7);
+  --logo-invert: 0;
 }
 
 // 冰猕猴桃汁绿主题
@@ -96,6 +101,7 @@
   --bg-gradient: linear-gradient(135deg, #E8F0E4 0%, #D8E8D0 100%);
   --primary-gradient: linear-gradient(135deg, #7A9A5C 0%, #8AAA6C 100%);
   --card-bg: rgba(255, 255, 255, 0.7);
+  --logo-invert: 0;
 }
 
 // 辛辣红主题
@@ -115,6 +121,7 @@
   --bg-gradient: linear-gradient(135deg, #F0E8E8 0%, #E8D8D8 100%);
   --primary-gradient: linear-gradient(135deg, #8B4049 0%, #A05058 100%);
   --card-bg: rgba(255, 255, 255, 0.7);
+  --logo-invert: 0;
 }
 
 // 明水鸭色主题
@@ -134,6 +141,7 @@
   --bg-gradient: linear-gradient(135deg, #E4F0F0 0%, #D4E8E8 100%);
   --primary-gradient: linear-gradient(135deg, #5A8A8A 0%, #6A9A9A 100%);
   --card-bg: rgba(255, 255, 255, 0.7);
+  --logo-invert: 0;
 }
 
 // ==================== 深色主题 ====================
@@ -154,6 +162,7 @@
   --bg-gradient: linear-gradient(135deg, #1a1816 0%, #252220 100%);
   --primary-gradient: linear-gradient(135deg, #8B7355 0%, #C9A86C 100%);
   --card-bg: rgba(40, 36, 32, 0.9);
+  --logo-invert: 1;
 }
 
 // 刚玉蓝 - 深色
@@ -172,6 +181,7 @@
   --bg-gradient: linear-gradient(135deg, #141a1c 0%, #1e282c 100%);
   --primary-gradient: linear-gradient(135deg, #4A6670 0%, #6A9AAA 100%);
   --card-bg: rgba(30, 40, 44, 0.9);
+  --logo-invert: 1;
 }
 
 // 冰猕猴桃汁绿 - 深色
@@ -190,6 +200,7 @@
   --bg-gradient: linear-gradient(135deg, #161a14 0%, #222a1e 100%);
   --primary-gradient: linear-gradient(135deg, #7A9A5C 0%, #9ABA7C 100%);
   --card-bg: rgba(34, 42, 30, 0.9);
+  --logo-invert: 1;
 }
 
 // 辛辣红 - 深色
@@ -208,6 +219,7 @@
   --bg-gradient: linear-gradient(135deg, #1a1416 0%, #2a2022 100%);
   --primary-gradient: linear-gradient(135deg, #8B4049 0%, #C06068 100%);
   --card-bg: rgba(42, 32, 34, 0.9);
+  --logo-invert: 1;
 }
 
 // 明水鸭色 - 深色
@@ -226,6 +238,7 @@
   --bg-gradient: linear-gradient(135deg, #121a1a 0%, #1c2a2a 100%);
   --primary-gradient: linear-gradient(135deg, #5A8A8A 0%, #7ABAAA 100%);
   --card-bg: rgba(28, 42, 42, 0.9);
+  --logo-invert: 1;
 }
 
 // 重置样式

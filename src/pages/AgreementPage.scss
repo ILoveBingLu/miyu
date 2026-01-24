@@ -63,6 +63,19 @@
     border-left: 4px solid var(--primary);
   }
 
+  .agreement-footer {
+    margin-top: 40px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border-color);
+    text-align: right;
+
+    p {
+      margin: 4px 0;
+      font-size: 13px;
+      color: var(--text-tertiary);
+    }
+  }
+
   &::-webkit-scrollbar {
     width: 8px;
   }

@@ -15,6 +15,7 @@ const WEEKDAY_NAMES = ['日', '一', '二', '三', '四', '五', '六']
 
 // 快捷选项
 const QUICK_OPTIONS = [
+  { label: '今天', days: 1 },
   { label: '最近7天', days: 7 },
   { label: '最近30天', days: 30 },
   { label: '最近90天', days: 90 },
@@ -56,14 +57,34 @@ function DateRangePicker({ startDate, endDate, onStartDateChange, onEndDateChang
 
   const handleQuickOption = (days: number) => {
     if (days === 0) {
+      // 全部时间
       onStartDateChange('')
       onEndDateChange('')
+    } else if (days === 1) {
+      // 今天
+      const today = new Date()
+      const year = today.getFullYear()
+      const month = String(today.getMonth() + 1).padStart(2, '0')
+      const day = String(today.getDate()).padStart(2, '0')
+      const todayStr = `${year}-${month}-${day}`
+      onStartDateChange(todayStr)
+      onEndDateChange(todayStr)
     } else {
-      const end = new Date()
-      const start = new Date()
-      start.setDate(start.getDate() - days)
-      onStartDateChange(start.toISOString().split('T')[0])
-      onEndDateChange(end.toISOString().split('T')[0])
+      // 其他天数（包含今天）
+      const today = new Date()
+      const start = new Date(today)
+      start.setDate(today.getDate() - days + 1)
+      
+      const startYear = start.getFullYear()
+      const startMonth = String(start.getMonth() + 1).padStart(2, '0')
+      const startDay = String(start.getDate()).padStart(2, '0')
+      
+      const endYear = today.getFullYear()
+      const endMonth = String(today.getMonth() + 1).padStart(2, '0')
+      const endDay = String(today.getDate()).padStart(2, '0')
+      
+      onStartDateChange(`${startYear}-${startMonth}-${startDay}`)
+      onEndDateChange(`${endYear}-${endMonth}-${endDay}`)
     }
     setIsOpen(false)
     setTimeout(() => onRangeComplete?.(), 0)

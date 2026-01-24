@@ -1940,3 +1940,269 @@
     }
   }
 }
+
+// 日期范围选项卡样式
+.date-range-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.date-range-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 16px;
+  background: var(--bg-secondary);
+  border: 2px solid transparent;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+
+  // 隐藏原生 radio
+  input[type="radio"] {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+  }
+
+  // 悬停效果
+  &:hover {
+    background: var(--bg-tertiary);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  }
+
+  // 激活状态
+  &.active {
+    background: var(--primary-bg, rgba(var(--primary-rgb), 0.1));
+    border-color: var(--primary);
+
+    .date-range-label {
+      color: var(--primary);
+      font-weight: 600;
+    }
+
+    .date-range-desc {
+      color: var(--primary);
+      opacity: 0.8;
+    }
+  }
+
+  // 内容布局
+  .date-range-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .date-range-label {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+    transition: color 0.2s;
+  }
+
+  .date-range-desc {
+    font-size: 12px;
+    color: var(--text-tertiary);
+    transition: color 0.2s;
+  }
+
+  // 选中图标
+  .date-range-check {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 18px;
+    height: 18px;
+    background: var(--primary);
+    border-radius: 50%;
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transform: scale(0);
+    animation: scaleIn 0.2s forwards;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+
+    svg {
+      width: 12px;
+      height: 12px;
+      stroke-width: 3px;
+    }
+  }
+}
+
+// 导出默认选项样式
+.export-default-options {
+  margin-top: 12px;
+}
+
+.export-option-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 16px;
+  background: var(--bg-secondary);
+  border: 2px solid transparent;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+
+  // 隐藏原生 checkbox
+  input[type="checkbox"] {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+  }
+
+  // 悬停效果
+  &:hover {
+    background: var(--bg-tertiary);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  }
+
+  // 激活状态
+  &.active {
+    background: var(--primary-bg, rgba(var(--primary-rgb), 0.1));
+    border-color: var(--primary);
+
+    .option-icon {
+      background: var(--primary);
+      color: white;
+      transform: scale(1.05);
+    }
+
+    .option-label {
+      color: var(--primary);
+      font-weight: 600;
+    }
+
+    .option-desc {
+      color: var(--primary);
+      opacity: 0.8;
+    }
+  }
+
+  // 内容布局
+  .option-content {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex: 1;
+  }
+
+  .option-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    background: var(--bg-tertiary);
+    border-radius: 12px;
+    color: var(--text-secondary);
+    transition: all 0.3s ease;
+    flex-shrink: 0;
+  }
+
+  .option-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+  }
+
+  .option-label {
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-primary);
+    transition: color 0.2s;
+  }
+
+  .option-desc {
+    font-size: 12px;
+    color: var(--text-tertiary);
+    line-height: 1.4;
+    transition: color 0.2s;
+  }
+
+  // 选中图标
+  .option-check {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 20px;
+    height: 20px;
+    background: var(--primary);
+    border-radius: 50%;
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transform: scale(0);
+    animation: scaleIn 0.2s forwards;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+
+    svg {
+      width: 14px;
+      height: 14px;
+      stroke-width: 3px;
+    }
+  }
+}
+
+// 缓存统计样式
+.cache-stats {
+  margin-bottom: 20px;
+
+  .cache-info {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 16px;
+    background: var(--bg-secondary);
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+
+    .cache-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 14px;
+
+      .label {
+        color: var(--text-secondary);
+      }
+
+      .value {
+        color: var(--text-primary);
+        font-weight: 500;
+        font-variant-numeric: tabular-nums;
+      }
+
+      &.total {
+        padding-top: 8px;
+        margin-top: 8px;
+        border-top: 1px solid var(--border-color);
+        font-weight: 600;
+
+        .label {
+          color: var(--text-primary);
+        }
+
+        .value {
+          color: var(--primary);
+        }
+      }
+    }
+  }
+}

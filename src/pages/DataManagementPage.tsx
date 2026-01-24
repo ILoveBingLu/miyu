@@ -47,7 +47,7 @@ function DataManagementPage() {
         setProgress(data)
         return
       }
-      
+
       // 完成/错误 - 清除弹窗并刷新数据库列表
       if (data.type === 'complete' || data.type === 'error') {
         setProgress(null)
@@ -191,8 +191,8 @@ function DataManagementPage() {
             </h3>
             <p className="progress-file">{progress.fileName}</p>
             <div className="progress-bar">
-              <div 
-                className="progress-fill" 
+              <div
+                className="progress-fill"
                 style={{ width: `${progress.fileProgress || 0}%` }}
               />
             </div>
@@ -211,7 +211,7 @@ function DataManagementPage() {
         <section className="page-section">
           <div className="section-header">
             <div>
-              <h2>数据库解密</h2>
+              <h2>数据库解密（已支持自动更新）</h2>
               <p className="section-desc">
                 {isLoading ? '正在扫描...' : `已找到 ${databases.length} 个数据库，${decryptedCount} 个已解密，${pendingCount} 个待解密`}
               </p>
@@ -222,7 +222,7 @@ function DataManagementPage() {
                 刷新
               </button>
               {needsUpdateCount > 0 && (
-                <button 
+                <button
                   className="btn btn-warning"
                   onClick={handleIncrementalUpdate}
                   disabled={isDecrypting}
@@ -231,7 +231,7 @@ function DataManagementPage() {
                   增量更新 ({needsUpdateCount})
                 </button>
               )}
-              <button 
+              <button
                 className="btn btn-primary"
                 onClick={handleDecryptAll}
                 disabled={isDecrypting || pendingCount === 0}

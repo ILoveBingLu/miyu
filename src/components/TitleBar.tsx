@@ -27,11 +27,14 @@ function TitleBar({ rightContent, title }: TitleBarProps) {
         <img src="./logo.png" alt="密语" className="title-logo" />
         <span className="titles">{title || 'CipherTalk'}</span>
         {isUpdating && (
-          <RefreshCw 
-            className="update-indicator" 
-            size={16} 
-            strokeWidth={2.5}
-          />
+          <div className="update-status">
+            <RefreshCw
+              className="update-indicator"
+              size={16}
+              strokeWidth={2.5}
+            />
+            <span className="update-text">正在同步数据...</span>
+          </div>
         )}
       </div>
       {displayContent && (

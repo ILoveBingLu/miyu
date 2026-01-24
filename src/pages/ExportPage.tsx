@@ -61,7 +61,13 @@ function ExportPage() {
   const [searchKeyword, setSearchKeyword] = useState('')
   const [exportFolder, setExportFolder] = useState<string>('')
   const [isExporting, setIsExporting] = useState(false)
-  const [exportProgress, setExportProgress] = useState({ current: 0, total: 0, currentName: '' })
+  const [exportProgress, setExportProgress] = useState({ 
+    current: 0, 
+    total: 0, 
+    currentName: '', 
+    phase: '',
+    detail: ''
+  })
   const [exportResult, setExportResult] = useState<ExportResult | null>(null)
 
   const [options, setOptions] = useState<ExportOptions>({
@@ -86,6 +92,75 @@ function ExportPage() {
       officials: false
     }
   })
+
+  // 加载默认导出配置
+  const loadDefaultExportConfig = useCallback(async () => {
+    try {
+      const defaultDateRange = await configService.getExportDefaultDateRange()
+      const defaultAvatars = await configService.getExportDefaultAvatars()
+
+      // 计算日期范围
+      let startDate = ''
+      let endDate = ''
+      if (defaultDateRange > 0) {
+        const today = new Date()
+        
+        const year = today.getFullYear()
+        const month = String(today.getMonth() + 1).padStart(2, '0')
+        const day = String(today.getDate()).padStart(2, '0')
+        const todayStr = `${year}-${month}-${day}`
+        
+        if (defaultDateRange === 1) {
+          // 最近1天 = 今天
+          startDate = todayStr
+          endDate = todayStr
+        } else {
+          // 其他天数：从 N 天前到今天
+          const start = new Date(today)
+          start.setDate(today.getDate() - defaultDateRange + 1)
+          
+          const startYear = start.getFullYear()
+          const startMonth = String(start.getMonth() + 1).padStart(2, '0')
+          const startDay = String(start.getDate()).padStart(2, '0')
+          
+          startDate = `${startYear}-${startMonth}-${startDay}`
+          endDate = todayStr
+        }
+      }
+
+      setOptions(prev => ({
+        ...prev,
+        startDate,
+        endDate,
+        exportAvatars: defaultAvatars
+      }))
+
+      setContactOptions(prev => ({
+        ...prev,
+        exportAvatars: defaultAvatars
+      }))
+    } catch (e) {
+      console.error('加载默认导出配置失败:', e)
+      // 即使加载失败也不影响页面显示，使用默认值
+    }
+  }, [])
+
+  // 监听导出进度
+  useEffect(() => {
+    const removeListener = window.electronAPI.export.onProgress((data) => {
+      setExportProgress({
+        current: data.current || 0,
+        total: data.total || 0,
+        currentName: data.currentSession || '',
+        phase: data.phase || '',
+        detail: data.detail || ''
+      })
+    })
+
+    return () => {
+      removeListener()
+    }
+  }, [])
 
   // 加载聊天会话
   const loadSessions = useCallback(async () => {
@@ -148,7 +223,8 @@ function ExportPage() {
   useEffect(() => {
     loadSessions()
     loadExportPath()
-  }, [loadSessions, loadExportPath])
+    loadDefaultExportConfig()
+  }, [loadSessions, loadExportPath, loadDefaultExportConfig])
 
   // 切换到通讯录时加载
   useEffect(() => {
@@ -290,7 +366,7 @@ function ExportPage() {
     if (selectedSessions.size === 0 || !exportFolder) return
 
     setIsExporting(true)
-    setExportProgress({ current: 0, total: selectedSessions.size, currentName: '' })
+    setExportProgress({ current: 0, total: selectedSessions.size, currentName: '', phase: '准备导出', detail: '' })
     setExportResult(null)
 
     try {
@@ -441,7 +517,9 @@ function ExportPage() {
                       {session.avatarUrl ? (
                         <img src={session.avatarUrl} alt="" />
                       ) : (
-                        <span>{getAvatarLetter(session.displayName || session.username)}</span>
+                        <span className={session.username.includes('@chatroom') ? 'group-placeholder' : ''}>
+                          {session.username.includes('@chatroom') ? '群' : getAvatarLetter(session.displayName || session.username)}
+                        </span>
                       )}
                     </div>
                     <div className="export-session-info">
@@ -745,7 +823,9 @@ function ExportPage() {
               <Loader2 size={32} className="spin" />
             </div>
             <h3>正在导出</h3>
+            {exportProgress.phase && <p className="progress-phase">{exportProgress.phase}</p>}
             <p className="progress-text">{exportProgress.currentName || '准备中...'}</p>
+            {exportProgress.detail && <p className="progress-detail">{exportProgress.detail}</p>}
             {exportProgress.total > 0 && (
               <>
                 <div className="progress-bar">

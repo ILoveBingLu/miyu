@@ -17,11 +17,13 @@ export const CONFIG_KEYS = {
   STT_LANGUAGES: 'sttLanguages',
   STT_MODEL_TYPE: 'sttModelType',
   QUOTE_STYLE: 'quoteStyle',
-  SKIP_INTEGRITY_CHECK: 'skipIntegrityCheck'
+  SKIP_INTEGRITY_CHECK: 'skipIntegrityCheck',
+  EXPORT_DEFAULT_DATE_RANGE: 'exportDefaultDateRange',
+  EXPORT_DEFAULT_AVATARS: 'exportDefaultAvatars'
 } as const
 
 // 当前协议版本 - 更新协议内容时递增此版本号
-export const CURRENT_AGREEMENT_VERSION = 1
+export const CURRENT_AGREEMENT_VERSION = 2
 
 // 获取解密密钥
 export async function getDecryptKey(): Promise<string | null> {
@@ -190,4 +192,128 @@ export async function getSkipIntegrityCheck(): Promise<boolean> {
 // 设置是否跳过完整性检查
 export async function setSkipIntegrityCheck(skip: boolean): Promise<void> {
   await config.set(CONFIG_KEYS.SKIP_INTEGRITY_CHECK, skip)
+}
+
+// 获取导出默认日期范围（天数，0表示不限制）
+export async function getExportDefaultDateRange(): Promise<number> {
+  const value = await config.get(CONFIG_KEYS.EXPORT_DEFAULT_DATE_RANGE)
+  return (value as number) || 0
+}
+
+// 设置导出默认日期范围（天数，0表示不限制）
+export async function setExportDefaultDateRange(days: number): Promise<void> {
+  await config.set(CONFIG_KEYS.EXPORT_DEFAULT_DATE_RANGE, days)
+}
+
+// 获取导出默认是否包含头像
+export async function getExportDefaultAvatars(): Promise<boolean> {
+  const value = await config.get(CONFIG_KEYS.EXPORT_DEFAULT_AVATARS)
+  return value !== undefined ? (value as boolean) : true
+}
+
+// 设置导出默认是否包含头像
+export async function setExportDefaultAvatars(exportAvatars: boolean): Promise<void> {
+  await config.set(CONFIG_KEYS.EXPORT_DEFAULT_AVATARS, exportAvatars)
+}
+
+
+// --- AI 摘要配置 ---
+
+// 获取当前选中的 AI 提供商
+export async function getAiProvider(): Promise<string> {
+  const value = await config.get('aiCurrentProvider')
+  return (value as string) || 'zhipu'
+}
+
+// 设置当前选中的 AI 提供商
+export async function setAiProvider(provider: string): Promise<void> {
+  await config.set('aiCurrentProvider', provider)
+}
+
+// 获取指定提供商的配置
+export async function getAiProviderConfig(providerId: string): Promise<{ apiKey: string; model: string } | null> {
+  const configs = await config.get('aiProviderConfigs')
+  const allConfigs = (configs as any) || {}
+  return allConfigs[providerId] || null
+}
+
+// 设置指定提供商的配置
+export async function setAiProviderConfig(providerId: string, providerConfig: { apiKey: string; model: string }): Promise<void> {
+  const configs = await config.get('aiProviderConfigs')
+  const allConfigs = (configs as any) || {}
+  allConfigs[providerId] = providerConfig
+  await config.set('aiProviderConfigs', allConfigs)
+}
+
+// 获取所有提供商的配置
+export async function getAllAiProviderConfigs(): Promise<{ [providerId: string]: { apiKey: string; model: string } }> {
+  const value = await config.get('aiProviderConfigs')
+  return (value as any) || {}
+}
+
+// 获取当前提供商的 API Key（兼容旧代码）
+export async function getAiApiKey(): Promise<string> {
+  const currentProvider = await getAiProvider()
+  const config = await getAiProviderConfig(currentProvider)
+  return config?.apiKey || ''
+}
+
+// 设置当前提供商的 API Key（兼容旧代码）
+export async function setAiApiKey(key: string): Promise<void> {
+  const currentProvider = await getAiProvider()
+  const existingConfig = await getAiProviderConfig(currentProvider)
+  await setAiProviderConfig(currentProvider, {
+    apiKey: key,
+    model: existingConfig?.model || ''
+  })
+}
+
+// 获取当前提供商的模型（兼容旧代码）
+export async function getAiModel(): Promise<string> {
+  const currentProvider = await getAiProvider()
+  const config = await getAiProviderConfig(currentProvider)
+  return config?.model || ''
+}
+
+// 设置当前提供商的模型（兼容旧代码）
+export async function setAiModel(model: string): Promise<void> {
+  const currentProvider = await getAiProvider()
+  const existingConfig = await getAiProviderConfig(currentProvider)
+  await setAiProviderConfig(currentProvider, {
+    apiKey: existingConfig?.apiKey || '',
+    model: model
+  })
+}
+
+// 获取 AI 默认时间范围
+export async function getAiDefaultTimeRange(): Promise<number> {
+  const value = await config.get('aiDefaultTimeRange')
+  return (value as number) || 7
+}
+
+// 设置 AI 默认时间范围
+export async function setAiDefaultTimeRange(days: number): Promise<void> {
+  await config.set('aiDefaultTimeRange', days)
+}
+
+// 获取 AI 摘要详细程度
+export async function getAiSummaryDetail(): Promise<'simple' | 'normal' | 'detailed'> {
+  const value = await config.get('aiSummaryDetail')
+  return (value as 'simple' | 'normal' | 'detailed') || 'normal'
+}
+
+// 设置 AI 摘要详细程度
+export async function setAiSummaryDetail(detail: 'simple' | 'normal' | 'detailed'): Promise<void> {
+  await config.set('aiSummaryDetail', detail)
+}
+
+// 获取是否启用思考模式
+export async function getAiEnableThinking(): Promise<boolean> {
+  const value = await config.get('aiEnableThinking')
+  return value !== undefined ? (value as boolean) : true
+}
+
+// 设置是否启用思考模式
+export async function setAiEnableThinking(enable: boolean): Promise<void> {
+  await config.set('aiEnableThinking', enable)
 }

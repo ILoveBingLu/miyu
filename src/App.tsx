@@ -20,8 +20,11 @@ import ImageWindow from './pages/ImageWindow'
 import VideoWindow from './pages/VideoWindow'
 import BrowserWindowPage from './pages/BrowserWindowPage'
 import SplashPage from './pages/SplashPage'
+import AISummaryWindow from './pages/AISummaryWindow'
 import { useAppStore } from './stores/appStore'
 import { useThemeStore } from './stores/themeStore'
+import { useChatStore } from './stores/chatStore'
+import { useUpdateStatusStore } from './stores/updateStatusStore'
 import { useActivationStore } from './stores/activationStore'
 import * as configService from './services/config'
 import { initTldList } from './utils/linkify'
@@ -114,8 +117,32 @@ function App() {
     const removeUpdateListener = window.electronAPI.app.onUpdateAvailable?.((info) => {
       setUpdateInfo(info)
     })
+
+    // 监听数据库是否有更新（正在解密同步）
+    const removeUpdateAvailableListener = window.electronAPI.dataManagement.onUpdateAvailable?.((hasUpdate) => {
+      const time = new Date().toLocaleTimeString()
+      if (hasUpdate) {
+        console.log(`[${time}] [自动更新] 检测到源数据库有变化，开始同步...`)
+        useUpdateStatusStore.getState().setIsUpdating(true)
+        useUpdateStatusStore.getState().addLog('检测到源数据库有更新，正在同步...')
+      } else {
+        console.log(`[${time}] [自动更新] 同步进程结束`)
+        useUpdateStatusStore.getState().setIsUpdating(false)
+      }
+    })
+
+    // 监听会话自动更新（静默增量同步）
+    const removeSessionsListener = window.electronAPI.chat.onSessionsUpdated?.((sessions) => {
+      const time = new Date().toLocaleTimeString()
+      console.log(`[${time}] [自动增量更新] 收到新数据，当前活跃会话:`, sessions.length)
+      useUpdateStatusStore.getState().addLog(`自动同步完成 (${sessions.length}个会话)`)
+      useChatStore.getState().setSessions(sessions)
+    })
+
     return () => {
       removeUpdateListener?.()
+      removeSessionsListener?.()
+      removeUpdateAvailableListener?.()
     }
   }, [])
 
@@ -128,11 +155,13 @@ function App() {
   const isGroupAnalyticsWindow = location.pathname === '/group-analytics-window'
   const isAnnualReportWindow = location.pathname === '/annual-report-window'
   const isAgreementWindow = location.pathname === '/agreement-window'
+  const isAISummaryWindow = location.pathname === '/ai-summary-window'
+  const isWelcomeWindow = location.pathname === '/welcome-window'
 
   // 启动时自动检查配置并连接数据库
   useEffect(() => {
     // 独立窗口不需要自动连接主数据库
-    if (isChatWindow || isGroupAnalyticsWindow || isAnnualReportWindow || isAgreementWindow || location.pathname === '/image-viewer-window') return
+    if (isChatWindow || isGroupAnalyticsWindow || isAnnualReportWindow || isAgreementWindow || isAISummaryWindow || location.pathname === '/image-viewer-window') return
 
     const autoConnect = async () => {
       try {
@@ -229,6 +258,16 @@ function App() {
     )
   }
 
+  // 独立 AI 摘要窗口
+  if (isAISummaryWindow) {
+    return <AISummaryWindow />
+  }
+
+  // 独立引导窗口
+  if (isWelcomeWindow) {
+    return <WelcomePage standalone />
+  }
+
   // 独立图片查看窗口
   if (location.pathname === '/image-viewer-window') {
     return <ImageWindow />
@@ -262,7 +301,7 @@ function App() {
           <div className="agreement-window">
             <div className="agreement-window-header">
               <Shield size={28} />
-              <h2>用户协议与隐私政策</h2>
+              <h2>用户协议与隐私政策 <span style={{ fontSize: '14px', fontWeight: 'normal', opacity: 0.6 }}>v{configService.CURRENT_AGREEMENT_VERSION}.0</span></h2>
             </div>
             <div className="agreement-window-body">
               <p className="agreement-intro">欢迎使用密语！在使用本软件前，请仔细阅读并同意以下条款：</p>
@@ -304,7 +343,13 @@ function App() {
                 <p>7.1 本协议的订立、执行、解释及争议解决均适用中华人民共和国大陆地区法律。</p>
                 <p>7.2 因本协议或本软件使用所引起的任何争议，双方应首先友好协商解决；协商不成的，任何一方均可向开发者所在地有管辖权的人民法院提起诉讼。</p>
 
-                <h3>二、隐私政策</h3>
+                <h3>二、AI服务说明（补充协议）</h3>
+                <p>8.1 本软件提供的AI摘要功能调用第三方大模型服务（如智谱AI、DeepSeek等），相关对话数据将发送至第三方服务器进行处理。</p>
+                <p>8.2 发送给AI的数据仅包含您选择的时间范围内的文本消息内容，不会包含图片、视频等文件数据，也不会包含此外的其他隐私信息。</p>
+                <p>8.3 AI生成的内容仅供参考，不代表本软件开发者立场。用户在使用AI功能前应自行评估数据隐私风险。</p>
+                <p>8.4 本软件不对第三方AI服务的稳定性、准确性及数据安全性承担责任。</p>
+
+                <h3>三、隐私政策</h3>
 
                 <h4>1. 数据收集声明</h4>
                 <p>1.1 本软件不会以任何形式收集、存储、上传、分析或共享任何用户的个人信息或聊天数据。</p>
@@ -327,6 +372,18 @@ function App() {
                 <p>5.2 由于本软件不收集、不保存任何用户数据，开发者无需也无法提供数据查询、更正或删除服务。</p>
 
                 <p className="agreement-notice">如您对本协议或隐私政策有任何疑问，请在使用前自行进行充分评估。再次提醒：一旦使用本软件，即视为您已完全理解并同意本协议的全部内容。</p>
+                <div style={{
+                  marginTop: '30px',
+                  paddingTop: '20px',
+                  borderTop: '1px dashed var(--border-color)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  color: 'var(--text-tertiary)',
+                  fontSize: '12px'
+                }}>
+                  <span>协议版本：v{configService.CURRENT_AGREEMENT_VERSION}.0</span>
+                  <span>更新日期：2026年01月23日</span>
+                </div>
               </div>
             </div>
             <div className="agreement-window-footer">

@@ -67,8 +67,27 @@ function processTextWithLineBreaks(text: string): React.ReactNode[] {
  * 消息内容渲染组件
  * 处理：换行符、链接识别、微信表情
  */
-function MessageContent({ content, className }: MessageContentProps) {
+function MessageContent({ content, className, disableLinks = false }: MessageContentProps & { disableLinks?: boolean }) {
   if (!content) return null
+
+  // 如果禁用链接，只处理表情和换行
+  if (disableLinks) {
+    const lines = content.split('\n')
+    const result: React.ReactNode[] = []
+    
+    lines.forEach((line, lineIndex) => {
+      if (lineIndex > 0) {
+        result.push(<br key={`br-${lineIndex}`} />)
+      }
+      result.push(
+        <React.Fragment key={`line-${lineIndex}`}>
+          {parseWechatEmoji(line)}
+        </React.Fragment>
+      )
+    })
+    
+    return <span className={className}>{result}</span>
+  }
 
   // 处理换行、链接和表情
   const processedContent = processTextWithLineBreaks(content)

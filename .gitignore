@@ -10,8 +10,8 @@ lerna-debug.log*
 # Dependencies
 node_modules
 dist
-dist-electron
 dist-ssr
+dist-electron
 *.local
 
 # Editor directories and files
@@ -42,24 +42,10 @@ release
 # OS
 Thumbs.db
 
-# ========================================
-# 半开源项目 - 核心敏感代码文件
-# ========================================
-
-# 核心解密服务 - 包含微信数据库解密算法
-electron/services/
-
-# 核心资源文件 - 包含关键的DLL和二进制文件
-resources/
-
-# 安装脚本 - 包含安装逻辑
-installer.nsh
-
-# 构建脚本 - 包含构建和发布逻辑
-scripts/add-size-to-yml.js
-
-# 配置文件 - 可能包含敏感配置
-.npmrc
-TODO.md
-package-lock.json
+# Docs
 Docs
+语音转文字接口文档
+
+# WeFolw
+WeFolw
+MyCoolInstaller

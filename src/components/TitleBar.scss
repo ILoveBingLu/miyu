@@ -17,22 +17,28 @@
   gap: 8px;
 }
 
+.update-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  padding: 2px 8px;
+  background: rgba(0, 120, 212, 0.08);
+  border-radius: 4px;
+}
+
 .update-indicator {
   color: #0078d4;
   animation: spin 1s linear infinite;
   flex-shrink: 0;
-  opacity: 1;
-  margin-left: 8px;
   display: inline-block !important;
-  vertical-align: middle;
-  
-  // 确保在不同主题下都可见
-  filter: brightness(1.2);
-  
-  // 添加轻微的背景色，使其更明显
-  padding: 2px;
-  border-radius: 3px;
-  background: rgba(0, 120, 212, 0.1);
+}
+
+.update-text {
+  font-size: 11px;
+  color: #0078d4;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 @keyframes spin {

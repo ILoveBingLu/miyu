@@ -1,4 +1,5 @@
 import type { ChatSession, Message, Contact, ContactInfo } from './models'
+import type { SummaryResult } from './ai'
 
 export interface ElectronAPI {
   window: {
@@ -12,6 +13,8 @@ export interface ElectronAPI {
     openAnnualReportWindow: (year: number) => Promise<boolean>
     openAgreementWindow: () => Promise<boolean>
     openPurchaseWindow: () => Promise<boolean>
+    openWelcomeWindow: () => Promise<boolean>
+    completeWelcome: () => Promise<boolean>
     isChatWindowOpen: () => Promise<boolean>
     closeChatWindow: () => Promise<boolean>
     setTitleBarOverlay: (options: { symbolColor: string }) => void
@@ -19,6 +22,7 @@ export interface ElectronAPI {
     openVideoPlayerWindow: (videoPath: string, videoWidth?: number, videoHeight?: number) => Promise<void>
     openBrowserWindow: (url: string, title?: string) => Promise<void>
     resizeToFitVideo: (videoWidth: number, videoHeight: number) => Promise<void>
+    openAISummaryWindow: (sessionId: string, sessionName: string) => Promise<boolean>
   }
   config: {
     get: (key: string) => Promise<unknown>
@@ -58,7 +62,7 @@ export interface ElectronAPI {
     killWeChat: () => Promise<boolean>
     launchWeChat: () => Promise<boolean>
     waitForWindow: (maxWaitSeconds?: number) => Promise<boolean>
-    startGetKey: () => Promise<{ success: boolean; key?: string; error?: string }>
+    startGetKey: (customWechatPath?: string) => Promise<{ success: boolean; key?: string; error?: string; needManualPath?: boolean }>
     cancel: () => Promise<boolean>
     detectCurrentAccount: (dbPath?: string, maxTimeDiffMinutes?: number) => Promise<{ wxid: string; dbPath: string } | null>
     onStatus: (callback: (data: { status: string; level: number }) => void) => () => void
@@ -67,11 +71,14 @@ export interface ElectronAPI {
     autoDetect: () => Promise<{ success: boolean; path?: string; error?: string }>
     scanWxids: (rootPath: string) => Promise<string[]>
     getDefault: () => Promise<string>
+    getBestCachePath: () => Promise<{ success: boolean; path: string; drive: string }>
   }
   wcdb: {
     testConnection: (dbPath: string, hexKey: string, wxid: string, isAutoConnect?: boolean) => Promise<{ success: boolean; error?: string; sessionCount?: number }>
     open: (dbPath: string, hexKey: string, wxid: string) => Promise<boolean>
     close: () => Promise<boolean>
+    decryptDatabase: (dbPath: string, hexKey: string, wxid: string) => Promise<{ success: boolean; error?: string; totalFiles?: number; successCount?: number; failCount?: number }>
+    onDecryptProgress: (callback: (data: { current: number; total: number; currentFile?: string; status: string; pageProgress?: { current: number; total: number } }) => void) => () => void
   }
   dataManagement: {
     scanDatabases: () => Promise<{
@@ -109,6 +116,7 @@ export interface ElectronAPI {
       failCount?: number
       error?: string
     }>
+    onProgress: (callback: (data: any) => void) => () => void
     getImageDirectories: () => Promise<{
       success: boolean
       directories?: { wxid: string; path: string }[]
@@ -215,6 +223,7 @@ export interface ElectronAPI {
       data?: string  // base64 encoded WAV
       error?: string
     }>
+    onSessionsUpdated: (callback: (sessions: ChatSession[]) => void) => () => void
   }
   analytics: {
     getOverallStatistics: () => Promise<{
@@ -378,6 +387,13 @@ export interface ElectronAPI {
       successCount?: number
       error?: string
     }>
+    onProgress: (callback: (data: { 
+      current?: number
+      total?: number
+      currentSession?: string
+      phase?: string
+      detail?: string
+    }) => void) => () => void
   }
   activation: {
     getDeviceId: () => Promise<string>
@@ -470,6 +486,87 @@ export interface ElectronAPI {
       error?: string
     }>
     clearModel: () => Promise<{ success: boolean; error?: string }>
+  }
+  // AI 摘要
+  ai: {
+    getProviders: () => Promise<Array<{
+      id: string
+      name: string
+      displayName: string
+      description: string
+      models: string[]
+      pricing: string
+      pricingDetail: {
+        input: number
+        output: number
+      }
+      website?: string
+    }>>
+    getProxyStatus: () => Promise<{
+      success: boolean
+      hasProxy?: boolean
+      proxyUrl?: string | null
+      error?: string
+    }>
+    refreshProxy: () => Promise<{
+      success: boolean
+      hasProxy?: boolean
+      proxyUrl?: string | null
+      message?: string
+      error?: string
+    }>
+    testProxy: (proxyUrl: string, testUrl?: string) => Promise<{
+      success: boolean
+      message?: string
+      error?: string
+    }>
+    testConnection: (provider: string, apiKey: string) => Promise<{
+      success: boolean
+      error?: string
+      needsProxy?: boolean
+    }>
+    estimateCost: (messageCount: number, provider: string) => Promise<{
+      success: boolean
+      tokens?: number
+      cost?: number
+      error?: string
+    }>
+    getUsageStats: (startDate?: string, endDate?: string) => Promise<{
+      success: boolean
+      stats?: any
+      error?: string
+    }>
+    getSummaryHistory: (sessionId: string, limit?: number) => Promise<{
+      success: boolean
+      history?: any[]
+      error?: string
+    }>
+    deleteSummary: (id: number) => Promise<{
+      success: boolean
+      error?: string
+    }>
+    renameSummary: (id: number, customName: string) => Promise<{
+      success: boolean
+      error?: string
+    }>
+    cleanExpiredCache: () => Promise<{
+      success: boolean
+      error?: string
+    }>
+    generateSummary: (sessionId: string, timeRange: number, options: {
+      provider: string
+      apiKey: string
+      model: string
+      detail: 'simple' | 'normal' | 'detailed'
+      customRequirement?: string
+      sessionName?: string
+      enableThinking?: boolean
+    }) => Promise<{
+      success: boolean
+      result?: SummaryResult
+      error?: string
+    }>
+    onSummaryChunk: (callback: (chunk: string) => void) => () => void
   }
 }
 

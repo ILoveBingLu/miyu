@@ -39,6 +39,7 @@ export interface Message {
   serverId: number
   localType: number
   createTime: number
+  sortSeq: number  // 排序序列号，用于精确去重
   isSend: number | null
   senderUsername: string | null
   parsedContent: string

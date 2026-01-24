@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Search, MessageSquare, AlertCircle, Loader2, RefreshCw, X, ChevronDown, Info, Calendar, Database, Hash, Image as ImageIcon, Play, Video, Copy, ZoomIn, CheckSquare, Check, Edit, Link } from 'lucide-react'
+import { Search, MessageSquare, AlertCircle, Loader2, RefreshCw, X, ChevronDown, Info, Calendar, Database, Hash, Image as ImageIcon, Play, Video, Copy, ZoomIn, CheckSquare, Check, Edit, Link, Sparkles } from 'lucide-react'
 import { useChatStore } from '../stores/chatStore'
 import { useUpdateStatusStore } from '../stores/updateStatusStore'
 import ChatBackground from '../components/ChatBackground'
@@ -37,41 +37,19 @@ function SessionAvatar({ session, size = 48 }: { session: ChatSession; size?: nu
   const containerRef = useRef<HTMLDivElement>(null)
   const isGroup = session.username.includes('@chatroom')
 
-  const getAvatarLetter = (): string => {
-    const name = session.displayName || session.username
-    if (!name) return '?'
-    const chars = [...name]
-    return chars[0] || '?'
-  }
-
   // 懒加载：使用 IntersectionObserver 检测头像是否进入可视区域
   useEffect(() => {
     if (!containerRef.current) return
 
     const element = containerRef.current
 
-    // 如果没有 avatarUrl，不需要懒加载，直接显示首字母
+    // 如果没有 avatarUrl，不需要懒加载
     if (!session.avatarUrl) {
       setIsVisible(false)
       return
     }
 
-    // 检查是否已经在可视区域内
-    const checkVisibility = () => {
-      const rect = element.getBoundingClientRect()
-      const viewportHeight = window.innerHeight
-      // 检查是否在可视区域（包括提前 100px 的预加载区域）
-      const isInViewport = rect.top < viewportHeight + 100 && rect.bottom > -100
-      return isInViewport
-    }
-
-    // 立即检查一次，如果已经在可视区域内，直接设置为可见
-    if (checkVisibility()) {
-      setIsVisible(true)
-      return
-    }
-
-    // 如果不在可视区域内，使用 IntersectionObserver 监听
+    // 使用 IntersectionObserver 监听，不立即加载
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
@@ -82,7 +60,7 @@ function SessionAvatar({ session, size = 48 }: { session: ChatSession; size?: nu
         })
       },
       {
-        rootMargin: '100px', // 提前 100px 开始加载
+        rootMargin: '50px', // 提前 50px 开始加载
         threshold: 0
       }
     )
@@ -146,17 +124,14 @@ function SessionAvatar({ session, size = 48 }: { session: ChatSession; size?: nu
       {shouldLoadImage && !imageError ? (
         <>
           {!imageLoaded && (
-            <>
-              <div className="avatar-skeleton" />
-              <span className="avatar-letter">{getAvatarLetter()}</span>
-            </>
+            <div className="avatar-skeleton" />
           )}
           <img
             ref={imgRef}
             src={session.avatarUrl}
             alt=""
             className={imageLoaded ? 'loaded' : ''}
-            style={{ 
+            style={{
               opacity: imageLoaded ? 1 : 0,
               transition: 'opacity 0.2s ease-in-out',
               position: imageLoaded ? 'relative' : 'absolute',
@@ -174,7 +149,7 @@ function SessionAvatar({ session, size = 48 }: { session: ChatSession; size?: nu
           />
         </>
       ) : (
-        <span className="avatar-letter">{getAvatarLetter()}</span>
+        <div className="avatar-skeleton" />
       )}
     </div>
   )
@@ -212,7 +187,8 @@ function ChatPage(_props: ChatPageProps) {
     setLoadingMessages,
     setLoadingMore,
     setHasMoreMessages,
-    setSearchKeyword
+    setSearchKeyword,
+    incrementSyncVersion
   } = useChatStore()
 
   const messageListRef = useRef<HTMLDivElement>(null)
@@ -225,7 +201,7 @@ function ChatPage(_props: ChatPageProps) {
   const updateStatusTimerRef = useRef<NodeJS.Timeout | null>(null)
   const isUserOperatingRef = useRef<boolean>(false) // 标记用户是否正在操作
   const [currentOffset, setCurrentOffset] = useState(0)
-  
+
   // 更新状态管理
   const setIsUpdating = useUpdateStatusStore(state => state.setIsUpdating)
   const isUpdating = useUpdateStatusStore(state => state.isUpdating)
@@ -326,7 +302,46 @@ function ChatPage(_props: ChatPageProps) {
     try {
       const result = await window.electronAPI.chat.getSessions()
       if (result.success && result.sessions) {
-        setSessions(result.sessions)
+        // 智能合并更新，避免闪烁
+        setSessions((prevSessions: ChatSession[]) => {
+          // 如果是首次加载，直接设置
+          if (prevSessions.length === 0) {
+            return result.sessions!
+          }
+
+          // 创建新会话的 Map，用于快速查找
+          const newSessionsMap = new Map(
+            result.sessions!.map(s => [s.username, s])
+          )
+
+          // 创建旧会话的 Map
+          const oldSessionsMap = new Map(
+            prevSessions.map(s => [s.username, s])
+          )
+
+          // 合并：保留顺序，只更新变化的字段
+          const merged = result.sessions!.map(newSession => {
+            const oldSession = oldSessionsMap.get(newSession.username)
+            
+            // 如果是新会话，直接返回
+            if (!oldSession) {
+              return newSession
+            }
+
+            // 检查是否有实质性变化
+            const hasChanges = 
+              oldSession.summary !== newSession.summary ||
+              oldSession.lastTimestamp !== newSession.lastTimestamp ||
+              oldSession.unreadCount !== newSession.unreadCount ||
+              oldSession.displayName !== newSession.displayName ||
+              oldSession.avatarUrl !== newSession.avatarUrl
+
+            // 如果有变化，返回新数据；否则保留旧对象引用（避免重新渲染）
+            return hasChanges ? newSession : oldSession
+          })
+
+          return merged
+        })
       }
     } catch (e) {
       console.error('加载会话失败:', e)
@@ -349,6 +364,8 @@ function ChatPage(_props: ChatPageProps) {
     try {
       // 清空后端缓存
       await window.electronAPI.chat.refreshCache()
+      // 重新加载会话列表，以确保联系人信息被重新加载
+      await loadSessions()
       // 重新加载消息
       setCurrentOffset(0)
       await loadMessages(currentSessionId, 0)
@@ -392,11 +409,9 @@ function ChatPage(_props: ChatPageProps) {
       if (result.success && result.messages) {
         if (offset === 0) {
           setMessages(result.messages)
-          // 首次加载滚动到底部
+          // 首次加载滚动到底部 (瞬间)
           requestAnimationFrame(() => {
-            if (messageListRef.current) {
-              messageListRef.current.scrollTop = messageListRef.current.scrollHeight
-            }
+            scrollToBottom(false)
           })
         } else {
           appendMessages(result.messages, true)
@@ -484,12 +499,19 @@ function ChatPage(_props: ChatPageProps) {
   }, [isLoadingMore, hasMoreMessages, currentSessionId, currentOffset])
 
   // 滚动到底部
-  const scrollToBottom = useCallback(() => {
+  const scrollToBottom = useCallback((smooth: boolean | React.MouseEvent = true) => {
     if (messageListRef.current) {
-      messageListRef.current.scrollTo({
-        top: messageListRef.current.scrollHeight,
-        behavior: 'smooth'
-      })
+      // 如果传入的是事件对象，默认为 smooth
+      const isSmooth = typeof smooth === 'boolean' ? smooth : true;
+
+      if (isSmooth) {
+        messageListRef.current.scrollTo({
+          top: messageListRef.current.scrollHeight,
+          behavior: 'smooth'
+        })
+      } else {
+        messageListRef.current.scrollTop = messageListRef.current.scrollHeight
+      }
     }
   }, [])
 
@@ -533,216 +555,121 @@ function ChatPage(_props: ChatPageProps) {
     }
   }, [])
 
-  // 自动增量更新：启用文件监听和定时检查（带性能优化）
+  // 监听会话更新事件（来自后台自动同步）
   useEffect(() => {
     if (!isConnected) return
 
-    // 监听数据管理进度事件（数据库更新时显示状态）
-    const removeProgressListener = window.electronAPI.dataManagement.onProgress((data) => {
-      if (data.type === 'update') {
-        // 数据库更新开始
-        setIsUpdating(true)
-      } else if (data.type === 'complete' || data.type === 'error') {
-        // 数据库更新完成或失败
-        // 延迟一点隐藏，确保前端更新也完成
-        setTimeout(() => {
-          setIsUpdating(false)
-        }, 500)
-      }
-    })
-
-    // 启用自动更新（文件监听实时检测 + 每30秒定时检查作为备选）
-    window.electronAPI.dataManagement.enableAutoUpdate(30).catch(console.error)
-
-    // 执行更新的实际函数（带防抖和频率限制）
-    const performUpdate = async () => {
-      const now = Date.now()
-      const MIN_UPDATE_INTERVAL = 1000 // 最小更新间隔：1秒（保证及时性，同时避免过于频繁）
+  // 监听会话列表更新
+    const removeSessionsListener = window.electronAPI.chat.onSessionsUpdated?.(async (newSessions) => {
+      // 更新增量更新时间戳
+      lastIncrementalUpdateTime = Date.now()
       
-      // 如果距离上次更新不足1秒，延迟执行
-      const timeSinceLastUpdate = now - lastUpdateTimeRef.current
-      if (timeSinceLastUpdate < MIN_UPDATE_INTERVAL) {
-        const delay = MIN_UPDATE_INTERVAL - timeSinceLastUpdate
-        if (updateTimerRef.current) {
-          clearTimeout(updateTimerRef.current)
+      // 智能合并更新会话列表，避免闪烁
+      setSessions((prevSessions: ChatSession[]) => {
+        // 如果之前没有会话，直接设置
+        if (prevSessions.length === 0) {
+          return newSessions
         }
-        updateTimerRef.current = setTimeout(() => {
-          performUpdate()
-        }, delay)
-        return
-      }
 
-      lastUpdateTimeRef.current = now
-      
+        // 创建旧会话的 Map
+        const oldSessionsMap = new Map(
+          prevSessions.map(s => [s.username, s])
+        )
+
+        // 合并：保留顺序，只更新变化的字段
+        const merged = newSessions.map(newSession => {
+          const oldSession = oldSessionsMap.get(newSession.username)
+          
+          // 如果是新会话，直接返回
+          if (!oldSession) {
+            return newSession
+          }
+
+          // 检查是否有实质性变化
+          const hasChanges = 
+            oldSession.summary !== newSession.summary ||
+            oldSession.lastTimestamp !== newSession.lastTimestamp ||
+            oldSession.unreadCount !== newSession.unreadCount ||
+            oldSession.displayName !== newSession.displayName ||
+            oldSession.avatarUrl !== newSession.avatarUrl
+
+          // 如果有变化，返回新数据；否则保留旧对象引用（避免重新渲染）
+          return hasChanges ? newSession : oldSession
+        })
+
+        return merged
+      })
+
+      const currentId = currentSessionIdRef.current
+      // 如果当前没有打开会话，只需要更新列表（App.tsx 已处理）
+      if (!currentId) return
+
+      // 2. 检查当前会话是否有新消息
+      const currentSession = newSessions.find(s => s.username === currentId)
+      if (!currentSession) return // 当前会话可能被删除了？
+
+      // 简单判断：如果当前会话的 lastTimestamp 变了，或者有新消息
+      // 这里我们采取积极策略：只要有更新事件，就尝试拉取最新消息
+      // 因为增量获取开销很小
+
       try {
-        // 记录当前滚动位置和是否在底部附近
+        const currentMessages = messagesRef.current
         const listEl = messageListRef.current
+
+        // 记录滚动位置
         let isNearBottom = false
         if (listEl) {
           const { scrollTop, scrollHeight, clientHeight } = listEl
           const distanceFromBottom = scrollHeight - scrollTop - clientHeight
-          isNearBottom = distanceFromBottom < 300 // 距离底部 300px 内认为是在底部附近
+          isNearBottom = distanceFromBottom < 300
         }
 
-        // 静默执行增量更新（不显示进度弹窗）
-        const result = await window.electronAPI.dataManagement.autoIncrementalUpdate(true)
-        
-        if (result.success && result.updated) {
-          console.log('[ChatPage] 自动增量更新完成，无感刷新数据...')
-          
-          // 重新连接聊天服务（因为增量更新会关闭连接）
-          const connectResult = await window.electronAPI.chat.connect()
-          if (!connectResult.success) {
-            console.error('[ChatPage] 重新连接失败:', connectResult.error)
+        // 获取最新 50 条消息（增量获取开销小）
+        const messagesResult = await window.electronAPI.chat.getMessages(currentId, 0, 50)
+
+        if (messagesResult.success && messagesResult.messages) {
+          const fetchedMessages = messagesResult.messages
+          if (fetchedMessages.length === 0) return
+
+          // 如果之前没消息，直接设置并返回
+          if (currentMessages.length === 0) {
+            setMessages(fetchedMessages)
+            setHasMoreMessages(messagesResult.hasMore ?? false)
             return
           }
-          
-          // 刷新会话列表（不影响当前聊天）
-          const sessionsResult = await window.electronAPI.chat.getSessions()
-          if (sessionsResult.success && sessionsResult.sessions) {
-            setSessions(sessionsResult.sessions)
-          }
-          
-          // 如果当前有打开的会话，增量更新消息（不清空现有消息）
-          const currentId = currentSessionIdRef.current
-          const currentMessages = messagesRef.current
-          
-          if (currentId && currentMessages.length > 0) {
-            // 获取最新消息（只获取比当前最新消息更新的）
-            const lastMessage = currentMessages[currentMessages.length - 1]
-            const lastTime = lastMessage.createTime
-            
-            // 获取最新50条消息
-            const messagesResult = await window.electronAPI.chat.getMessages(currentId, 0, 50)
-            if (messagesResult.success && messagesResult.messages) {
-              // 过滤出真正的新消息（比最后一条消息更新的）
-              const newMessages = messagesResult.messages.filter(msg => {
-                // 如果时间戳更大，或者是同一条消息但内容可能更新了
-                return msg.createTime > lastTime || 
-                       (msg.createTime === lastTime && msg.localId !== lastMessage.localId)
+
+          // 使用多维 Key (localId + createTime) 进行去重，找出真正的“新”消息
+          const existingKeys = new Set(currentMessages.map(m => `${m.serverId}-${m.localId}-${m.createTime}-${m.sortSeq}`))
+          const uniqueNewMessages = fetchedMessages.filter(msg =>
+            !existingKeys.has(`${msg.serverId}-${msg.localId}-${msg.createTime}-${msg.sortSeq}`)
+          )
+
+          if (uniqueNewMessages.length > 0) {
+            // 按 createTime 升序排序，确保追加顺序正确
+            uniqueNewMessages.sort((a, b) => a.createTime - b.createTime || a.localId - b.localId)
+
+            console.log(`[ChatPage] 自动增长发现 ${uniqueNewMessages.length} 条新消息`)
+            appendMessages(uniqueNewMessages, false)
+
+            // 滚动处理：如果用户在底部附近，则自动平滑滚动
+            if (isNearBottom) {
+              requestAnimationFrame(() => {
+                scrollToBottom(true)
               })
-              
-              // 去重：检查是否已存在（使用更高效的 Map）
-              const existingKeys = new Set(currentMessages.map(m => `${m.localId}-${m.createTime}`))
-              const uniqueNewMessages = newMessages.filter(msg => 
-                !existingKeys.has(`${msg.localId}-${msg.createTime}`)
-              )
-              
-              if (uniqueNewMessages.length > 0) {
-                console.log(`[ChatPage] 发现 ${uniqueNewMessages.length} 条新消息，增量添加`)
-                
-                // 增量添加到末尾
-                appendMessages(uniqueNewMessages, false)
-                
-                // 只有在底部附近时才自动滚动到底部，否则保持当前位置
-                requestAnimationFrame(() => {
-                  if (messageListRef.current) {
-                    if (isNearBottom) {
-                      // 用户在底部附近，自动滚动到底部显示新消息
-                      messageListRef.current.scrollTop = messageListRef.current.scrollHeight
-                    }
-                    // 用户在看历史消息，保持当前位置（新消息会在底部，但不会打断用户）
-                  }
-                })
-              }
             }
-          } else if (currentId && currentMessages.length === 0) {
-            // 如果没有消息，正常加载（首次加载）
-            setCurrentOffset(0)
-            const messagesResult = await window.electronAPI.chat.getMessages(currentId, 0, 50)
-            if (messagesResult.success && messagesResult.messages) {
-              setMessages(messagesResult.messages)
-              setHasMoreMessages(messagesResult.hasMore ?? false)
-            }
+            // 每次成功发现新消息或活跃会话更新，都增加全局同步计数，触发图片无感检查
+            incrementSyncVersion()
           }
         }
       } catch (e) {
-        console.error('[ChatPage] 自动增量更新失败:', e)
+        console.error('[ChatPage] 自动刷新消息失败:', e)
       }
-    }
-
-    // 监听更新可用事件（文件监听实时触发，带防抖合并）
-    const removeListener = window.electronAPI.dataManagement.onUpdateAvailable(async (hasUpdate) => {
-      if (!hasUpdate) return
-
-      // 如果用户正在操作（点击会话、加载消息），延迟自动更新，避免影响用户体验
-      if (isUserOperatingRef.current || isLoadingMessages) {
-        console.log('[ChatPage] 用户正在操作，延迟自动更新')
-        // 延迟3秒再检查（给用户足够时间完成操作）
-        setTimeout(() => {
-          // 如果3秒后用户还在操作，继续延迟
-          if (!isUserOperatingRef.current && !isLoadingMessages) {
-            // 用户已完成操作，可以更新了
-            triggerUpdate()
-          } else {
-            // 继续延迟
-            setTimeout(() => {
-              if (!isUserOperatingRef.current && !isLoadingMessages) {
-                triggerUpdate()
-              }
-            }, 2000)
-          }
-        }, 3000)
-        return
-      }
-
-      triggerUpdate()
     })
 
-    // 提取更新触发逻辑，便于复用
-    const triggerUpdate = () => {
-      // 提前1秒显示更新指示器（但立即显示，不等待）
-      setIsUpdating(true)
-      console.log('[ChatPage] 显示更新指示器（提前1秒）')
-      
-      // 如果更新被取消，1秒后隐藏
-      if (updateStatusTimerRef.current) {
-        clearTimeout(updateStatusTimerRef.current)
-      }
-      updateStatusTimerRef.current = setTimeout(() => {
-        // 如果1秒后还没有开始更新，可能是误触发，先隐藏
-        // 但实际更新开始时会重新显示
-      }, 1000)
-
-      // 使用防抖机制，合并300ms内的多次文件变化（文件监听本身也有500ms防抖）
-      // 这样可以合并短时间内的多次变化，同时保证及时性
-      if (updateTimerRef.current) {
-        clearTimeout(updateTimerRef.current)
-      }
-      
-      // 延迟300ms执行，合并短时间内的多次更新请求
-      // 这样文件监听检测到变化后，最多延迟300ms+1秒=1.3秒就能更新
-      updateTimerRef.current = setTimeout(async () => {
-        try {
-          console.log('[ChatPage] 开始执行更新')
-          setIsUpdating(true) // 确保显示
-          await performUpdate()
-        } finally {
-          // 更新完成后隐藏指示器
-          console.log('[ChatPage] 更新完成，隐藏指示器')
-          setIsUpdating(false)
-          if (updateStatusTimerRef.current) {
-            clearTimeout(updateStatusTimerRef.current)
-            updateStatusTimerRef.current = null
-          }
-        }
-      }, 300)
-    }
-
     return () => {
-      removeListener()
-      removeProgressListener()
-      if (updateTimerRef.current) {
-        clearTimeout(updateTimerRef.current)
-      }
-      if (updateStatusTimerRef.current) {
-        clearTimeout(updateStatusTimerRef.current)
-      }
-      setIsUpdating(false)
-      // 组件卸载时禁用自动更新
-      window.electronAPI.dataManagement.disableAutoUpdate().catch(console.error)
+      removeSessionsListener?.()
     }
-  }, [isConnected, isLoadingMessages, setSessions, setMessages, setHasMoreMessages, setCurrentOffset, appendMessages, setIsUpdating, setConnected, setConnectionError])
+  }, [isConnected, currentSessionId, appendMessages, setMessages, setHasMoreMessages])
 
   // 点击外部或右键其他地方关闭右键菜单
   useEffect(() => {
@@ -858,8 +785,13 @@ function ChatPage(_props: ChatPageProps) {
                 </button>
               )}
             </div>
-            <button className="icon-btn refresh-btn" onClick={handleRefresh} disabled={isLoadingSessions}>
-              <RefreshCw size={16} className={isLoadingSessions ? 'spin' : ''} />
+            <button
+              className="icon-btn refresh-btn"
+              onClick={handleRefresh}
+              disabled={isLoadingSessions}
+              title="刷新会话列表"
+            >
+              <RefreshCw size={16} className={isLoadingSessions || isUpdating ? 'spin' : ''} />
             </button>
           </div>
         </div>
@@ -906,7 +838,7 @@ function ChatPage(_props: ChatPageProps) {
                         const hasMoreLines = summary.includes('\n')
                         return (
                           <>
-                            <MessageContent content={firstLine} />
+                            <MessageContent content={firstLine} disableLinks={true} />
                             {hasMoreLines && <span>...</span>}
                           </>
                         )
@@ -946,12 +878,6 @@ function ChatPage(_props: ChatPageProps) {
                   <div className="header-subtitle">群聊</div>
                 )}
               </div>
-              {isUpdating && (
-                <div className="update-indicator-header">
-                  <RefreshCw size={14} className="spin" />
-                  <span>正在更新...</span>
-                </div>
-              )}
               <div className="header-actions">
                 <button
                   className="icon-btn refresh-messages-btn"
@@ -959,7 +885,19 @@ function ChatPage(_props: ChatPageProps) {
                   disabled={isRefreshingMessages || isLoadingMessages}
                   title="刷新消息"
                 >
-                  <RefreshCw size={18} className={isRefreshingMessages ? 'spin' : ''} />
+                  <RefreshCw size={18} className={isRefreshingMessages || isUpdating ? 'spin' : ''} />
+                </button>
+                <button
+                  className="icon-btn ai-summary-btn"
+                  onClick={() => {
+                    window.electronAPI.window.openAISummaryWindow(
+                      currentSession.username,
+                      currentSession.displayName || currentSession.username
+                    )
+                  }}
+                  title="AI 摘要"
+                >
+                  <Sparkles size={18} />
                 </button>
                 <button
                   className={`icon-btn detail-btn ${showDetailPanel ? 'active' : ''}`}
@@ -1448,8 +1386,17 @@ function enqueueDecrypt(fn: () => Promise<void>) {
   void processDecryptQueue()
 }
 
-// 视频信息缓存
-const videoInfoCache = new Map<string, { videoUrl?: string; coverUrl?: string; thumbUrl?: string; exists: boolean }>()
+// 视频信息缓存（带时间戳）
+const videoInfoCache = new Map<string, { 
+  videoUrl?: string
+  coverUrl?: string
+  thumbUrl?: string
+  exists: boolean
+  cachedAt: number  // 缓存时间戳
+}>()
+
+// 最后一次增量更新时间戳
+let lastIncrementalUpdateTime = 0
 
 // 消息气泡组件
 function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, hasImageKey, onContextMenu, isSelected, quoteStyle = 'default' }: {
@@ -1463,6 +1410,9 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
   isSelected?: boolean;
   quoteStyle?: 'default' | 'wechat';
 }) {
+  const syncVersion = useChatStore(state => state.syncVersion)
+  const lastSyncVersionRef = useRef(syncVersion)
+
   const isPatAppMsg = (() => {
     const content = message.rawContent || message.parsedContent || ''
     if (!content) return false
@@ -1545,6 +1495,15 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
       return
     }
 
+    console.log('[ChatPage] 准备下载表情:', {
+      md5: message.emojiMd5,
+      cdn: message.emojiCdnUrl,
+      productId: message.productId,
+      createTime: message.createTime,
+      hasCreateTime: !!message.createTime,
+      messageKeys: Object.keys(message)
+    })
+
     // 先检查缓存
     const cached = emojiDataUrlCache.get(cacheKey)
     if (cached) {
@@ -1563,9 +1522,11 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
         emojiDataUrlCache.set(cacheKey, result.localPath)
         setEmojiLocalPath(result.localPath)
       } else {
+        console.error('[ChatPage] 表情包下载失败:', result.error)
         setEmojiError(true)
       }
     }).catch((e) => {
+      console.error('[ChatPage] 表情包下载异常:', e)
       setEmojiError(true)
     }).finally(() => {
       setEmojiLoading(false)
@@ -1689,8 +1650,16 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
     // 先检查缓存
     const cached = videoInfoCache.get(message.videoMd5)
     if (cached) {
-      setVideoInfo(cached)
-      return
+      // 智能缓存失效：如果视频不存在，且缓存时间早于最后一次增量更新，则重新获取
+      const shouldRefetch = !cached.exists && cached.cachedAt < lastIncrementalUpdateTime
+      
+      if (!shouldRefetch) {
+        setVideoInfo(cached)
+        return
+      }
+      
+      // 需要重新获取，清除旧缓存
+      videoInfoCache.delete(message.videoMd5)
     }
 
     setVideoLoading(true)
@@ -1700,15 +1669,20 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
           exists: result.exists,
           videoUrl: result.videoUrl,
           coverUrl: result.coverUrl,
-          thumbUrl: result.thumbUrl
+          thumbUrl: result.thumbUrl,
+          cachedAt: Date.now()  // 记录缓存时间
         }
         videoInfoCache.set(message.videoMd5!, info)
         setVideoInfo(info)
       } else {
-        setVideoInfo({ exists: false })
+        const info = { exists: false, cachedAt: Date.now() }
+        videoInfoCache.set(message.videoMd5!, info)
+        setVideoInfo(info)
       }
     }).catch(() => {
-      setVideoInfo({ exists: false })
+      const info = { exists: false, cachedAt: Date.now() }
+      videoInfoCache.set(message.videoMd5!, info)
+      setVideoInfo(info)
     }).finally(() => {
       setVideoLoading(false)
     })
@@ -1870,14 +1844,20 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
   }, [sttLoading, sttTranscript, voiceDataUrl, session.username, message.localId, message.createTime])
 
   // 群聊中获取发送者信息
+  const [isLoadingSender, setIsLoadingSender] = useState(false)
+  
   useEffect(() => {
     if (isGroupChat && !isSent && message.senderUsername) {
+      setIsLoadingSender(true)
       window.electronAPI.chat.getContactAvatar(message.senderUsername).then((result: { avatarUrl?: string; displayName?: string } | null) => {
         if (result) {
           setSenderAvatarUrl(result.avatarUrl)
           setSenderName(result.displayName)
         }
-      }).catch(() => { })
+        setIsLoadingSender(false)
+      }).catch(() => { 
+        setIsLoadingSender(false)
+      })
     }
   }, [isGroupChat, isSent, message.senderUsername])
 
@@ -1895,10 +1875,15 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
     if (!isImage) return
     if (!message.imageMd5 && !message.imageDatName) return
     if (!isVisible) return  // 只有可见时才加载
-    if (imageUpdateCheckedRef.current === imageCacheKey) return
-    if (imageLocalPath) return  // 如果已经有本地路径，不需要再解析
+
+    // 如果是新一轮全局同步且之前没成功，允许重试
+    const isNewSync = syncVersion > lastSyncVersionRef.current
+    if (imageUpdateCheckedRef.current === imageCacheKey && !isNewSync) return
+
+    if (imageLocalPath && !isNewSync) return  // 如果已经有本地路径且不是强制同步，不需要再解析
     if (imageLoading) return  // 已经在加载中
 
+    lastSyncVersionRef.current = syncVersion
     imageUpdateCheckedRef.current = imageCacheKey
 
     let cancelled = false
@@ -1985,7 +1970,7 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
       cancelled = true
       if (timeoutId) window.clearTimeout(timeoutId)
     }
-  }, [isImage, message.imageMd5, message.imageDatName, isVisible, imageCacheKey, imageLocalPath, session.username])
+  }, [isImage, message.imageMd5, message.imageDatName, isVisible, imageCacheKey, imageLocalPath, session.username, syncVersion])
 
   // 自动检查转写缓存
   useEffect(() => {
@@ -2074,7 +2059,7 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
     : (isGroupChat ? senderAvatarUrl : session.avatarUrl)
   const avatarLetter = isSent
     ? '我'
-    : getAvatarLetter(isGroupChat ? (senderName || message.senderUsername || '?') : (session.displayName || session.username))
+    : getAvatarLetter(isGroupChat ? (senderName || '?') : (session.displayName || session.username))
 
   // 是否有引用消息
   const hasQuote = message.quotedContent && message.quotedContent.length > 0
@@ -2191,10 +2176,23 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
       // 视频不存在
       if (!videoInfo?.exists || !videoInfo.videoUrl) {
         return (
-          <div className="video-unavailable" ref={videoContainerRef}>
+          <button
+            className="video-unavailable"
+            ref={videoContainerRef as unknown as React.RefObject<HTMLButtonElement>}
+            onClick={() => {
+              // 清除缓存并重新加载
+              if (message.videoMd5) {
+                videoInfoCache.delete(message.videoMd5)
+              }
+              setVideoInfo(null)
+              setVideoLoading(false)
+            }}
+            type="button"
+          >
             <Video size={24} />
             <span>视频不可用</span>
-          </div>
+            <span className="video-action">点击重试</span>
+          </button>
         )
       }
 
@@ -2438,6 +2436,44 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
         )
       }
 
+      // 转账消息 (type=2000)：渲染为转账卡片
+      if (appMsgType === '2000') {
+        try {
+          const content = message.rawContent || message.parsedContent || ''
+          const parser = new DOMParser()
+          const doc = parser.parseFromString(content, 'text/xml')
+          
+          const feedesc = doc.querySelector('feedesc')?.textContent || ''
+          const payMemo = doc.querySelector('pay_memo')?.textContent || ''
+          const paysubtype = doc.querySelector('paysubtype')?.textContent || '1'
+          
+          // paysubtype: 1=待收款, 3=已收款
+          const isReceived = paysubtype === '3'
+          
+          return (
+            <div className={`transfer-message ${isReceived ? 'received' : ''}`}>
+              <div className="transfer-icon">
+                <svg width="32" height="32" viewBox="0 0 40 40" fill="none">
+                  <circle cx="20" cy="20" r="18" stroke="white" strokeWidth="2"/>
+                  <path d="M12 20h16M20 12l8 8-8 8" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
+              <div className="transfer-info">
+                <div className="transfer-amount">{feedesc}</div>
+                {payMemo && <div className="transfer-memo">{payMemo}</div>}
+                <div className="transfer-label">{isReceived ? '已收款' : '微信转账'}</div>
+              </div>
+            </div>
+          )
+        } catch (e) {
+          return (
+            <div className="bubble-content">
+              <MessageContent content={message.parsedContent} />
+            </div>
+          )
+        }
+      }
+
       if (url) {
         return (
           <div
@@ -2492,7 +2528,11 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
         }}
       >
         <div className="bubble-avatar">
-          {avatarUrl ? (
+          {isLoadingSender && isGroupChat && !isSent ? (
+            <div className="avatar-skeleton-wrapper">
+              <span className="avatar-skeleton" />
+            </div>
+          ) : avatarUrl ? (
             <img src={avatarUrl} alt="" />
           ) : (
             <span className="avatar-letter">{avatarLetter}</span>
@@ -2502,7 +2542,11 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
           {/* 群聊中显示发送者名称 */}
           {isGroupChat && !isSent && (
             <div className="sender-name">
-              {senderName || message.senderUsername || '群成员'}
+              {isLoadingSender ? (
+                <span className="sender-skeleton" />
+              ) : (
+                senderName || '群成员'
+              )}
             </div>
           )}
           {renderContent()}

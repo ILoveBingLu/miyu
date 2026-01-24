@@ -10,29 +10,29 @@ function WhatsNewModal({ onClose, version }: WhatsNewModalProps) {
     const updates = [
         {
             icon: <Rocket size={20} />,
-            title: '极速启动',
-            desc: '重构启动流程，显著提升应用加载速度，带来丝滑的入场动画体验。'
+            title: 'BUG修复',
+            desc: '修复消息内容会出现重复的问题。'
         },
         {
             icon: <MessageSquareQuote size={20} />,
-            title: '样式自定义',
-            desc: '支持在设置中切换引用消息样式（需重启聊天窗口生效）。'
-        },
-        {
-            icon: <RefreshCw size={20} />,
-            title: '智能同步',
-            desc: '优化数据库连接机制，支持自动同步最新消息数据（同步过程约需 20 秒）。'
+            title: '优化',
+            desc: '优化AI摘要，新增适配大模型。'
         },
         {
             icon: <Sparkles size={20} />,
-            title: '体验升级',
-            desc: '支持“拍一拍”系统消息解析，新增头像懒加载与骨架屏，聊天浏览更流畅。'
+            title: 'AI摘要',
+            desc: '支持AI在单人会话以及群聊会话中进行AI摘要总结。（默认只能选择天数）'
         },
         {
-            icon: <Mic size={20} />,
-            title: '语音增强',
-            desc: '语音转文字支持多模型选择，灵活平衡识别精度与速度，适配更多场景。'
-        }
+            icon: <RefreshCw size={20} />,
+            title: '体验升级',
+            desc: '修复了一些已知的问题。'
+        }//,
+        // {
+        //     icon: <Mic size={20} />,
+        //     title: '语音增强',
+        //     desc: '语音转文字支持多模型选择，灵活平衡识别精度与速度，适配更多场景。'
+        // }
     ]
 
     return (

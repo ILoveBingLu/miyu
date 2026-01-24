@@ -63,12 +63,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openAnnualReportWindow: (year: number) => ipcRenderer.invoke('window:openAnnualReportWindow', year),
     openAgreementWindow: () => ipcRenderer.invoke('window:openAgreementWindow'),
     openPurchaseWindow: () => ipcRenderer.invoke('window:openPurchaseWindow'),
+    openWelcomeWindow: () => ipcRenderer.invoke('window:openWelcomeWindow'),
+    completeWelcome: () => ipcRenderer.invoke('window:completeWelcome'),
     isChatWindowOpen: () => ipcRenderer.invoke('window:isChatWindowOpen'),
     closeChatWindow: () => ipcRenderer.invoke('window:closeChatWindow'),
     setTitleBarOverlay: (options: { symbolColor: string }) => ipcRenderer.send('window:setTitleBarOverlay', options),
     openImageViewerWindow: (imagePath: string) => ipcRenderer.invoke('window:openImageViewerWindow', imagePath),
     openVideoPlayerWindow: (videoPath: string, videoWidth?: number, videoHeight?: number) => ipcRenderer.invoke('window:openVideoPlayerWindow', videoPath, videoWidth, videoHeight),
     openBrowserWindow: (url: string, title?: string) => ipcRenderer.invoke('window:openBrowserWindow', url, title),
+    openAISummaryWindow: (sessionId: string, sessionName: string) => ipcRenderer.invoke('window:openAISummaryWindow', sessionId, sessionName),
     resizeToFitVideo: (videoWidth: number, videoHeight: number) => ipcRenderer.invoke('window:resizeToFitVideo', videoWidth, videoHeight),
     splashReady: () => ipcRenderer.send('window:splashReady'),
     onSplashFadeOut: (callback: () => void) => {
@@ -84,7 +87,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     killWeChat: () => ipcRenderer.invoke('wxkey:killWeChat'),
     launchWeChat: () => ipcRenderer.invoke('wxkey:launchWeChat'),
     waitForWindow: (maxWaitSeconds?: number) => ipcRenderer.invoke('wxkey:waitForWindow', maxWaitSeconds),
-    startGetKey: () => ipcRenderer.invoke('wxkey:startGetKey'),
+    startGetKey: (customWechatPath?: string) => ipcRenderer.invoke('wxkey:startGetKey', customWechatPath),
     cancel: () => ipcRenderer.invoke('wxkey:cancel'),
     detectCurrentAccount: (dbPath?: string, maxTimeDiffMinutes?: number) => ipcRenderer.invoke('wxkey:detectCurrentAccount', dbPath, maxTimeDiffMinutes),
     onStatus: (callback: (data: { status: string; level: number }) => void) => {
@@ -97,7 +100,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   dbPath: {
     autoDetect: () => ipcRenderer.invoke('dbpath:autoDetect'),
     scanWxids: (rootPath: string) => ipcRenderer.invoke('dbpath:scanWxids', rootPath),
-    getDefault: () => ipcRenderer.invoke('dbpath:getDefault')
+    getDefault: () => ipcRenderer.invoke('dbpath:getDefault'),
+    getBestCachePath: () => ipcRenderer.invoke('dbpath:getBestCachePath')
   },
 
   // WCDB 数据库
@@ -106,7 +110,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('wcdb:testConnection', dbPath, hexKey, wxid, isAutoConnect),
     open: (dbPath: string, hexKey: string, wxid: string) =>
       ipcRenderer.invoke('wcdb:open', dbPath, hexKey, wxid),
-    close: () => ipcRenderer.invoke('wcdb:close')
+    close: () => ipcRenderer.invoke('wcdb:close'),
+    decryptDatabase: (dbPath: string, hexKey: string, wxid: string) =>
+      ipcRenderer.invoke('wcdb:decryptDatabase', dbPath, hexKey, wxid),
+    onDecryptProgress: (callback: (data: any) => void) => {
+      ipcRenderer.on('wcdb:decryptProgress', (_, data) => callback(data))
+      return () => ipcRenderer.removeAllListeners('wcdb:decryptProgress')
+    }
   },
 
   // 数据管理
@@ -189,7 +199,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     close: () => ipcRenderer.invoke('chat:close'),
     refreshCache: () => ipcRenderer.invoke('chat:refreshCache'),
     getSessionDetail: (sessionId: string) => ipcRenderer.invoke('chat:getSessionDetail', sessionId),
-    getVoiceData: (sessionId: string, msgId: string, createTime?: number) => ipcRenderer.invoke('chat:getVoiceData', sessionId, msgId, createTime)
+    getVoiceData: (sessionId: string, msgId: string, createTime?: number) => ipcRenderer.invoke('chat:getVoiceData', sessionId, msgId, createTime),
+    onSessionsUpdated: (callback: (sessions: any[]) => void) => {
+      const listener = (_: any, sessions: any[]) => callback(sessions)
+      ipcRenderer.on('chat:sessions-updated', listener)
+      return () => ipcRenderer.removeListener('chat:sessions-updated', listener)
+    }
   },
 
   // 数据分析
@@ -221,7 +236,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     exportSession: (sessionId: string, outputPath: string, options: any) =>
       ipcRenderer.invoke('export:exportSession', sessionId, outputPath, options),
     exportContacts: (outputDir: string, options: any) =>
-      ipcRenderer.invoke('export:exportContacts', outputDir, options)
+      ipcRenderer.invoke('export:exportContacts', outputDir, options),
+    onProgress: (callback: (data: any) => void) => {
+      ipcRenderer.on('export:progress', (_, data) => callback(data))
+      return () => ipcRenderer.removeAllListeners('export:progress')
+    }
   },
 
   // 激活
@@ -265,6 +284,31 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getCachedTranscript: (sessionId: string, createTime: number) => ipcRenderer.invoke('stt:getCachedTranscript', sessionId, createTime),
     updateTranscript: (sessionId: string, createTime: number, transcript: string) => ipcRenderer.invoke('stt:updateTranscript', sessionId, createTime, transcript),
     clearModel: () => ipcRenderer.invoke('stt:clearModel')
+  },
+
+  // AI 摘要
+  ai: {
+    getProviders: () => ipcRenderer.invoke('ai:getProviders'),
+    getProxyStatus: () => ipcRenderer.invoke('ai:getProxyStatus'),
+    refreshProxy: () => ipcRenderer.invoke('ai:refreshProxy'),
+    testProxy: (proxyUrl: string, testUrl?: string) => ipcRenderer.invoke('ai:testProxy', proxyUrl, testUrl),
+    testConnection: (provider: string, apiKey: string) => ipcRenderer.invoke('ai:testConnection', provider, apiKey),
+    estimateCost: (messageCount: number, provider: string) => ipcRenderer.invoke('ai:estimateCost', messageCount, provider),
+    getUsageStats: (startDate?: string, endDate?: string) => ipcRenderer.invoke('ai:getUsageStats', startDate, endDate),
+    getSummaryHistory: (sessionId: string, limit?: number) => ipcRenderer.invoke('ai:getSummaryHistory', sessionId, limit),
+    deleteSummary: (id: number) => ipcRenderer.invoke('ai:deleteSummary', id),
+    renameSummary: (id: number, customName: string) => ipcRenderer.invoke('ai:renameSummary', id, customName),
+    cleanExpiredCache: () => ipcRenderer.invoke('ai:cleanExpiredCache'),
+    generateSummary: (sessionId: string, timeRange: number, options: {
+      provider: string
+      apiKey: string
+      model: string
+      detail: 'simple' | 'normal' | 'detailed'
+    }) => ipcRenderer.invoke('ai:generateSummary', sessionId, timeRange, options),
+    onSummaryChunk: (callback: (chunk: string) => void) => {
+      ipcRenderer.on('ai:summaryChunk', (_, chunk) => callback(chunk))
+      return () => ipcRenderer.removeAllListeners('ai:summaryChunk')
+    }
   }
 })
 

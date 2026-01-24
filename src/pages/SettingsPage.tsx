@@ -1,24 +1,26 @@
 import { useState, useEffect } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useLocation } from 'react-router-dom'
 import { useAppStore } from '../stores/appStore'
 import { useThemeStore, themes } from '../stores/themeStore'
 import { useActivationStore } from '../stores/activationStore'
 import { dialog } from '../services/ipc'
 import * as configService from '../services/config'
+import AISummarySettings from '../components/ai/AISummarySettings'
 import {
   Eye, EyeOff, Key, FolderSearch, FolderOpen, Search,
   RotateCcw, Trash2, Save, Plug, X, Check, Sun, Moon,
   Palette, Database, ImageIcon, Download, HardDrive, Info, RefreshCw, Shield, Clock, CheckCircle, AlertCircle, FileText, Mic,
-  Zap, Layers
+  Zap, Layers, User, Sparkles, Github
 } from 'lucide-react'
 import './SettingsPage.scss'
 
-type SettingsTab = 'appearance' | 'database' | 'stt' | 'data' | 'activation' | 'about'
+type SettingsTab = 'appearance' | 'database' | 'stt' | 'ai' | 'data' | 'activation' | 'about'
 
 const tabs: { id: SettingsTab; label: string; icon: React.ElementType }[] = [
   { id: 'appearance', label: '外观', icon: Palette },
   { id: 'database', label: '数据解密', icon: Database },
   { id: 'stt', label: '语音转文字', icon: Mic },
+  { id: 'ai', label: 'AI 摘要', icon: Sparkles },
   { id: 'data', label: '数据管理', icon: HardDrive },
   // { id: 'activation', label: '激活', icon: Shield },
   { id: 'about', label: '关于', icon: Info }
@@ -73,7 +75,6 @@ function SettingsPage() {
   const [isLoading, setIsLoadingState] = useState(false)
   const [isTesting, setIsTesting] = useState(false)
   const [isGettingKey, setIsGettingKey] = useState(false)
-  const [isDetectingPath, setIsDetectingPath] = useState(false)
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false)
   const [isDownloading, setIsDownloading] = useState(false)
   const [downloadProgress, setDownloadProgress] = useState(0)
@@ -101,6 +102,16 @@ function SettingsPage() {
   const [sttModelType, setSttModelType] = useState<'int8' | 'float32'>('int8')
   const [quoteStyle, setQuoteStyle] = useState<'default' | 'wechat'>('default')
   const [skipIntegrityCheck, setSkipIntegrityCheck] = useState(false)
+  const [exportDefaultDateRange, setExportDefaultDateRange] = useState<number>(0)
+  const [exportDefaultAvatars, setExportDefaultAvatars] = useState<boolean>(true)
+
+  // AI 相关配置状态
+  const [aiProvider, setAiProviderState] = useState('zhipu')
+  const [aiApiKey, setAiApiKeyState] = useState('')
+  const [aiModel, setAiModelState] = useState('')
+  const [aiDefaultTimeRange, setAiDefaultTimeRangeState] = useState<number>(7)
+  const [aiSummaryDetail, setAiSummaryDetailState] = useState<'simple' | 'normal' | 'detailed'>('normal')
+  const [aiEnableThinking, setAiEnableThinkingState] = useState<boolean>(true)
 
   // 日志相关状态
   const [logFiles, setLogFiles] = useState<Array<{ name: string; size: number; mtime: Date }>>([])
@@ -149,6 +160,27 @@ function SettingsPage() {
 
       const savedQuoteStyle = await configService.getQuoteStyle()
       setQuoteStyle(savedQuoteStyle)
+
+      const savedExportDefaultDateRange = await configService.getExportDefaultDateRange()
+      setExportDefaultDateRange(savedExportDefaultDateRange)
+
+      const savedExportDefaultAvatars = await configService.getExportDefaultAvatars()
+      setExportDefaultAvatars(savedExportDefaultAvatars)
+
+      // 加载 AI 配置
+      const savedAiProvider = await configService.getAiProvider()
+      const savedAiApiKey = await configService.getAiApiKey()
+      const savedAiModel = await configService.getAiModel()
+      const savedAiDefaultTimeRange = await configService.getAiDefaultTimeRange()
+      const savedAiSummaryDetail = await configService.getAiSummaryDetail()
+      const savedAiEnableThinking = await configService.getAiEnableThinking()
+
+      setAiProviderState(savedAiProvider)
+      setAiApiKeyState(savedAiApiKey)
+      setAiModelState(savedAiModel)
+      setAiDefaultTimeRangeState(savedAiDefaultTimeRange)
+      setAiSummaryDetailState(savedAiSummaryDetail)
+      setAiEnableThinkingState(savedAiEnableThinking)
     } catch (e) {
       console.error('加载配置失败:', e)
     }
@@ -477,31 +509,11 @@ function SettingsPage() {
     setKeyStatus('')
   }
 
-  const handleAutoDetectPath = async () => {
-    if (isDetectingPath) return
-    setIsDetectingPath(true)
+  const handleOpenWelcomeWindow = async () => {
     try {
-      const result = await window.electronAPI.dbPath.autoDetect()
-      if (result.success && result.path) {
-        setDbPath(result.path)
-        await configService.setDbPath(result.path)
-        showMessage(`自动检测成功：${result.path}`, true)
-
-        const wxids = await window.electronAPI.dbPath.scanWxids(result.path)
-        if (wxids.length === 1) {
-          setWxid(wxids[0])
-          await configService.setMyWxid(wxids[0])
-          showMessage(`已检测到账号：${wxids[0]}`, true)
-        } else if (wxids.length > 1) {
-          showMessage(`检测到 ${wxids.length} 个账号，请手动选择`, true)
-        }
-      } else {
-        showMessage(result.error || '未能自动检测到数据库目录', false)
-      }
+      await window.electronAPI.window.openWelcomeWindow()
     } catch (e) {
-      showMessage(`自动检测失败: ${e}`, false)
-    } finally {
-      setIsDetectingPath(false)
+      showMessage('打开引导窗口失败', false)
     }
   }
 
@@ -640,6 +652,18 @@ function SettingsPage() {
       // 保存引用样式
       await configService.setQuoteStyle(quoteStyle)
 
+      // 保存导出默认设置
+      await configService.setExportDefaultDateRange(exportDefaultDateRange)
+      await configService.setExportDefaultAvatars(exportDefaultAvatars)
+
+      // 保存 AI 配置
+      await configService.setAiProvider(aiProvider)
+      await configService.setAiApiKey(aiApiKey)
+      await configService.setAiModel(aiModel)
+      await configService.setAiDefaultTimeRange(aiDefaultTimeRange)
+      await configService.setAiSummaryDetail(aiSummaryDetail)
+      await configService.setAiEnableThinking(aiEnableThinking)
+
       // 如果数据库配置完整，尝试设置已连接状态（不进行耗时测试，仅标记）
       if (decryptKey && dbPath && wxid && decryptKey.length === 64) {
         setDbConnected(true, dbPath)
@@ -734,8 +758,16 @@ function SettingsPage() {
 
   const renderDatabaseTab = () => (
     <div className="tab-content">
+      {/* 引导窗口按钮 */}
+      <div className="form-group">
+        <button className="btn btn-secondary" onClick={handleOpenWelcomeWindow}>
+          <Zap size={16} /> 打开配置引导窗口
+        </button>
+        <span className="form-hint">使用引导窗口一步步完成配置</span>
+      </div>
+
       {/* 数据库解密部分 */}
-      <h3 className="section-title">数据库解密</h3>
+      <h3 className="section-title">数据库解密（已支持自动更新）</h3>
 
       <div className="form-group">
         <label>解密密钥</label>
@@ -759,12 +791,7 @@ function SettingsPage() {
         <label>数据库根目录</label>
         <span className="form-hint">xwechat_files 目录</span>
         <input type="text" placeholder="例如: C:\Users\xxx\Documents\xwechat_files" value={dbPath} onChange={(e) => setDbPath(e.target.value)} />
-        <div className="btn-row">
-          <button className="btn btn-primary" onClick={handleAutoDetectPath} disabled={isDetectingPath}>
-            <FolderSearch size={16} /> {isDetectingPath ? '检测中...' : '自动检测'}
-          </button>
-          <button className="btn btn-secondary" onClick={handleSelectDbPath}><FolderOpen size={16} /> 浏览选择</button>
-        </div>
+        <button className="btn btn-primary" onClick={handleSelectDbPath}><FolderOpen size={16} /> 浏览选择</button>
       </div>
 
       <div className="form-group">
@@ -1190,6 +1217,7 @@ function SettingsPage() {
       {/* 导出设置 */}
       <section className="settings-section">
         <h3 className="section-title">导出设置</h3>
+
         <div className="form-group">
           <label>导出目录</label>
           <span className="form-hint">聊天记录导出的默认保存位置</span>
@@ -1197,6 +1225,67 @@ function SettingsPage() {
           <div className="btn-row">
             <button className="btn btn-secondary" onClick={handleSelectExportPath}><FolderOpen size={16} /> 浏览选择</button>
             <button className="btn btn-secondary" onClick={handleResetExportPath}><RotateCcw size={16} /> 恢复默认</button>
+          </div>
+        </div>
+
+        <div className="form-group">
+          <label>默认日期范围</label>
+          <span className="form-hint">导出时自动填充的日期范围，0表示不限制</span>
+          <div className="date-range-options">
+            {[
+              { value: 0, label: '不限制', desc: '全部消息' },
+              { value: 1, label: '今天', desc: '仅今日消息' },
+              { value: 7, label: '最近7天', desc: '过去一周' },
+              { value: 30, label: '最近30天', desc: '过去一个月' },
+              { value: 90, label: '最近90天', desc: '过去三个月' },
+              { value: 180, label: '最近180天', desc: '过去半年' },
+              { value: 365, label: '最近1年', desc: '过去一年' }
+            ].map(option => (
+              <label
+                key={option.value}
+                className={`date-range-card ${exportDefaultDateRange === option.value ? 'active' : ''}`}
+              >
+                <input
+                  type="radio"
+                  name="exportDefaultDateRange"
+                  value={option.value}
+                  checked={exportDefaultDateRange === option.value}
+                  onChange={(e) => setExportDefaultDateRange(Number(e.target.value))}
+                />
+                <div className="date-range-content">
+                  <span className="date-range-label">{option.label}</span>
+                  <span className="date-range-desc">{option.desc}</span>
+                </div>
+                {exportDefaultDateRange === option.value && (
+                  <div className="date-range-check"><Check size={14} /></div>
+                )}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="form-group">
+          <label>默认导出选项</label>
+          <div className="export-default-options">
+            <label className={`export-option-card ${exportDefaultAvatars ? 'active' : ''}`}>
+              <input
+                type="checkbox"
+                checked={exportDefaultAvatars}
+                onChange={(e) => setExportDefaultAvatars(e.target.checked)}
+              />
+              <div className="option-content">
+                <div className="option-icon">
+                  <User size={20} />
+                </div>
+                <div className="option-info">
+                  <span className="option-label">默认导出头像</span>
+                  <span className="option-desc">勾选后导出时默认包含头像</span>
+                </div>
+              </div>
+              {exportDefaultAvatars && (
+                <div className="option-check"><Check size={14} /></div>
+              )}
+            </label>
           </div>
         </div>
       </section>
@@ -1395,6 +1484,15 @@ function SettingsPage() {
     </div>
   )
 
+  const location = useLocation()
+
+  // 检查导航传递的更新信息
+  useEffect(() => {
+    if (location.state?.updateInfo) {
+      setUpdateInfo(location.state.updateInfo)
+    }
+  }, [location.state])
+
   const renderAboutTab = () => (
     <div className="tab-content about-tab">
       <div className="about-card">
@@ -1432,10 +1530,29 @@ function SettingsPage() {
       </div>
 
       <div className="about-footer">
-        <p className="about-desc">
-          微信聊天记录分析工具，基于 <a href="#" onClick={(e) => { e.preventDefault(); window.electronAPI.shell.openExternal('https://github.com/ycccccccy/echotrace') }}>EchoTrace</a> 重构开发，已获得原作者 <a href="#" onClick={(e) => { e.preventDefault(); window.electronAPI.shell.openExternal('https://github.com/ycccccccy') }}>ycccccccy</a> 授权。
+        <div className="github-capsules" style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginBottom: '16px' }}>
+          <button
+            className="btn btn-secondary"
+            style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', borderRadius: '20px' }}
+            onClick={() => window.electronAPI.shell.openExternal('https://github.com/ILoveBingLu/miyu')}
+          >
+            <Github size={16} />
+            <span>密语 CipherTalk</span>
+          </button>
+          <button
+            className="btn btn-secondary"
+            style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', borderRadius: '20px' }}
+            onClick={() => window.electronAPI.shell.openExternal('https://github.com/hicccc77/WeFlow')}
+          >
+            <Github size={16} />
+            <span>WeFlow</span>
+          </button>
+        </div>
+
+        <p className="about-warning" style={{ color: '#ff4d4f', fontWeight: 500, marginBottom: '20px' }}>
+          软件为免费，如果有人找你收钱，请骂死他，太贱了，拿别人东西卖钱！
         </p>
-        <p className="about-warning">原项目完全免费，凡是通过非 GitHub 下载echotrace且收费的均为骗子，请勿上当！</p>
+
         <div className="about-links">
           <a href="#" onClick={(e) => { e.preventDefault(); window.electronAPI.shell.openExternal('https://miyu.aiqji.com') }}>官网</a>
           <span>·</span>
@@ -1501,6 +1618,23 @@ function SettingsPage() {
         {activeTab === 'appearance' && renderAppearanceTab()}
         {activeTab === 'database' && renderDatabaseTab()}
         {activeTab === 'stt' && renderSttTab()}
+        {activeTab === 'ai' && (
+          <AISummarySettings
+            provider={aiProvider}
+            setProvider={setAiProviderState}
+            apiKey={aiApiKey}
+            setApiKey={setAiApiKeyState}
+            model={aiModel}
+            setModel={setAiModelState}
+            defaultTimeRange={aiDefaultTimeRange}
+            setDefaultTimeRange={setAiDefaultTimeRangeState}
+            summaryDetail={aiSummaryDetail}
+            setSummaryDetail={setAiSummaryDetailState}
+            enableThinking={aiEnableThinking}
+            setEnableThinking={setAiEnableThinkingState}
+            showMessage={showMessage}
+          />
+        )}
         {activeTab === 'data' && renderDataManagementTab()}
         {activeTab === 'activation' && renderActivationTab()}
         {activeTab === 'about' && renderAboutTab()}
