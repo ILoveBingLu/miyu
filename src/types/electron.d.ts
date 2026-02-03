@@ -200,6 +200,11 @@ export interface ElectronAPI {
       hasMore?: boolean;
       error?: string
     }>
+    getAllVoiceMessages: (sessionId: string) => Promise<{
+      success: boolean;
+      messages?: Message[];
+      error?: string
+    }>
     getContact: (username: string) => Promise<Contact | null>
     getContactAvatar: (username: string) => Promise<{ avatarUrl?: string; displayName?: string } | null>
     getMyAvatarUrl: () => Promise<{ success: boolean; avatarUrl?: string; error?: string }>
@@ -515,6 +520,56 @@ export interface ElectronAPI {
       error?: string
     }>
     clearModel: () => Promise<{ success: boolean; error?: string }>
+  }
+  // 语音转文字 - Whisper GPU 加速
+  sttWhisper: {
+    detectGPU: () => Promise<{
+      available: boolean
+      provider: string
+      info: string
+    }>
+    checkModel: (modelType: string) => Promise<{
+      exists: boolean
+      modelPath?: string
+      sizeBytes?: number
+      error?: string
+    }>
+    downloadModel: (modelType: string) => Promise<{
+      success: boolean
+      error?: string
+    }>
+    clearModel: (modelType: string) => Promise<{
+      success: boolean
+      error?: string
+    }>
+    transcribe: (wavData: Buffer, options: { modelType?: string; language?: string }) => Promise<{
+      success: boolean
+      transcript?: string
+      error?: string
+    }>
+    onDownloadProgress: (callback: (progress: {
+      downloadedBytes: number
+      totalBytes?: number
+      percent?: number
+    }) => void) => () => void
+    downloadGPUComponents: () => Promise<{
+      success: boolean
+      error?: string
+    }>
+    checkGPUComponents: () => Promise<{
+      installed: boolean
+      missingFiles?: string[]
+      gpuDir?: string
+      reason?: string
+      error?: string
+    }>
+    onGPUDownloadProgress: (callback: (progress: {
+      currentFile: string
+      fileProgress: number
+      overallProgress: number
+      completedFiles: number
+      totalFiles: number
+    }) => void) => () => void
   }
   // AI 摘要
   ai: {

@@ -1250,6 +1250,162 @@ class ChatService extends EventEmitter {
   }
 
   /**
+   * 获取会话的所有语音消息（用于批量转写）
+   * 复用 getMessages 的查询逻辑，只查询语音消息类型
+   */
+  async getAllVoiceMessages(
+    sessionId: string
+  ): Promise<{ success: boolean; messages?: Message[]; error?: string }> {
+    try {
+      if (!this.dbDir) {
+        const connectResult = await this.connect()
+        if (!connectResult.success) {
+          return { success: false, error: connectResult.error || '数据库未连接' }
+        }
+      }
+
+      const myWxid = this.configService.get('myWxid')
+      const cleanedMyWxid = myWxid ? this.cleanAccountDirName(myWxid) : ''
+
+      // 使用与 getMessages 相同的方法查找会话对应的表
+      const dbTablePairs = this.findSessionTables(sessionId)
+      if (dbTablePairs.length === 0) {
+        return { success: false, error: '未找到该会话的消息表' }
+      }
+
+      let allVoiceMessages: Message[] = []
+
+      for (const { db, tableName, dbPath } of dbTablePairs) {
+        try {
+          const hasName2IdTable = this.checkTableExists(db, 'Name2Id')
+
+          // 获取当前用户的 rowid（使用缓存）
+          let myRowId: number | null = null
+          if (myWxid && hasName2IdTable) {
+            const cacheKeyOriginal = `${dbPath}:${myWxid}`
+            const cachedRowIdOriginal = this.myRowIdCache.get(cacheKeyOriginal)
+
+            if (cachedRowIdOriginal !== undefined) {
+              myRowId = cachedRowIdOriginal
+            } else {
+              const row = db.prepare('SELECT rowid FROM Name2Id WHERE user_name = ?').get(myWxid) as any
+              if (row?.rowid) {
+                myRowId = row.rowid
+                this.myRowIdCache.set(cacheKeyOriginal, myRowId)
+              } else if (cleanedMyWxid && cleanedMyWxid !== myWxid) {
+                const cacheKeyCleaned = `${dbPath}:${cleanedMyWxid}`
+                const cachedRowIdCleaned = this.myRowIdCache.get(cacheKeyCleaned)
+
+                if (cachedRowIdCleaned !== undefined) {
+                  myRowId = cachedRowIdCleaned
+                } else {
+                  const row2 = db.prepare('SELECT rowid FROM Name2Id WHERE user_name = ?').get(cleanedMyWxid) as any
+                  myRowId = row2?.rowid ?? null
+                  this.myRowIdCache.set(cacheKeyCleaned, myRowId)
+                }
+              } else {
+                this.myRowIdCache.set(cacheKeyOriginal, null)
+              }
+            }
+          }
+
+          // 查询所有语音消息 (localType = 34)
+          // 检查表结构
+          const columns = db.prepare(`PRAGMA table_info('${tableName}')`).all() as any[]
+          const columnNames = columns.map((c: any) => c.name.toLowerCase())
+          const hasTypeColumn = columnNames.includes('type')
+          const hasLocalTypeColumn = columnNames.includes('local_type')
+
+          // 构建 WHERE 条件
+          let typeCondition = ''
+          if (hasLocalTypeColumn && hasTypeColumn) {
+            typeCondition = '(local_type = 34 OR type = 34)'
+          } else if (hasLocalTypeColumn) {
+            typeCondition = 'local_type = 34'
+          } else if (hasTypeColumn) {
+            typeCondition = 'type = 34'
+          } else {
+            console.warn(`[ChatService] 表 ${tableName} 没有 local_type 或 type 列，跳过`)
+            continue
+          }
+
+          // 构建完整的 SQL 查询
+          let sql: string
+          let rows: any[]
+
+          if (hasName2IdTable && myRowId !== null) {
+            // 有 Name2Id 表且找到了当前用户的 rowid
+            sql = `SELECT m.*, 
+                   CASE WHEN m.real_sender_id = ? THEN 1 ELSE 0 END AS computed_is_send,
+                   n.user_name AS sender_username
+                   FROM ${tableName} m
+                   LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
+                   WHERE ${typeCondition}
+                   ORDER BY m.sort_seq DESC`
+            rows = db.prepare(sql).all(myRowId) as any[]
+          } else if (hasName2IdTable) {
+            // 有 Name2Id 表但没找到当前用户的 rowid
+            sql = `SELECT m.*, n.user_name AS sender_username
+                   FROM ${tableName} m
+                   LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
+                   WHERE ${typeCondition}
+                   ORDER BY m.sort_seq DESC`
+            rows = db.prepare(sql).all() as any[]
+          } else {
+            // 没有 Name2Id 表
+            sql = `SELECT * FROM ${tableName}
+                   WHERE ${typeCondition}
+                   ORDER BY sort_seq DESC`
+            rows = db.prepare(sql).all() as any[]
+          }
+
+          // 处理查询结果
+          for (const row of rows) {
+            const content = this.decodeMessageContent(row.message_content, row.compress_content)
+            const localType = row.local_type || row.type || 1
+            const isSend = row.computed_is_send ?? row.is_send ?? null
+            const voiceDuration = this.parseVoiceDuration(content)
+
+            allVoiceMessages.push({
+              localId: row.local_id || 0,
+              serverId: row.server_id || 0,
+              localType,
+              createTime: row.create_time || 0,
+              sortSeq: row.sort_seq || 0,
+              isSend,
+              senderUsername: row.sender_username || null,
+              parsedContent: '',
+              rawContent: content,
+              voiceDuration
+            })
+          }
+        } catch (e: any) {
+          console.error(`[ChatService] 查询语音消息失败 (${dbPath}):`, e)
+        }
+      }
+
+      // 按 sort_seq 降序排序
+      allVoiceMessages.sort((a, b) => b.sortSeq - a.sortSeq)
+
+      // 去重
+      const seen = new Set<string>()
+      allVoiceMessages = allVoiceMessages.filter(msg => {
+        const key = `${msg.serverId}-${msg.localId}-${msg.createTime}-${msg.sortSeq}`
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
+
+      console.log(`[ChatService] 共找到 ${allVoiceMessages.length} 条语音消息（去重后）`)
+
+      return { success: true, messages: allVoiceMessages }
+    } catch (e) {
+      console.error('[ChatService] 获取所有语音消息失败:', e)
+      return { success: false, error: String(e) }
+    }
+  }
+
+  /**
    * 根据日期获取消息（用于日期跳转）
    * @param sessionId 会话ID
    * @param targetTimestamp 目标日期的 Unix 时间戳（秒）
@@ -1575,6 +1731,14 @@ class ChatService extends EventEmitter {
       default:
         // 对于未知的 localType，检查 XML type 来判断消息类型
         if (xmlType) {
+          // type=87 群公告消息
+          if (xmlType === '87') {
+            const textAnnouncement = this.extractXmlValue(content, 'textannouncement')
+            if (textAnnouncement) {
+              return `[群公告] ${textAnnouncement}`
+            }
+            return '[群公告]'
+          }
           // 如果有 XML type，尝试按 type 49 的逻辑解析
           if (xmlType === '2000' || xmlType === '5' || xmlType === '6' || xmlType === '19' || 
               xmlType === '33' || xmlType === '36' || xmlType === '49' || xmlType === '57') {
@@ -1597,6 +1761,15 @@ class ChatService extends EventEmitter {
   private parseType49(content: string): string {
     const title = this.extractXmlValue(content, 'title')
     const type = this.extractXmlValue(content, 'type')
+
+    // 群公告消息（type 87）特殊处理
+    if (type === '87') {
+      const textAnnouncement = this.extractXmlValue(content, 'textannouncement')
+      if (textAnnouncement) {
+        return `[群公告] ${textAnnouncement}`
+      }
+      return '[群公告]'
+    }
 
     // 转账消息特殊处理
     if (type === '2000') {

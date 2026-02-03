@@ -1,6 +1,6 @@
 {
   "name": "ciphertalk",
-  "version": "2.1.8",
+  "version": "2.1.9",
   "description": "密语 - 微信聊天记录查看工具",
   "author": "ILoveBingLu",
   "license": "CC-BY-NC-SA-4.0",
@@ -111,7 +111,8 @@
     "extraResources": [
       {
         "from": "resources/",
-        "to": "resources/"
+        "to": "resources/",
+        "filter": ["**/*", "!whisper/**"]
       },
       {
         "from": "public/icon.ico",

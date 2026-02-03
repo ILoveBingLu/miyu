@@ -36,6 +36,8 @@ interface ConfigSchema {
   // STT 相关
   sttLanguages: string[]
   sttModelType: 'int8' | 'float32'
+  sttMode: 'cpu' | 'gpu'  // STT 模式：CPU (SenseVoice) 或 GPU (Whisper)
+  whisperModelType: 'tiny' | 'base' | 'small' | 'medium'  // Whisper 模型类型
 
   // 日志相关
   logLevel: string
@@ -79,6 +81,8 @@ const defaults: ConfigSchema = {
   language: 'zh-CN',
   sttLanguages: ['zh'],
   sttModelType: 'int8',
+  sttMode: 'cpu',  // 默认使用 CPU 模式
+  whisperModelType: 'small',  // 默认使用 small 模型
   agreementVersion: 0,
   activationData: '',
   logLevel: 'WARN', // 默认只记录警告和错误

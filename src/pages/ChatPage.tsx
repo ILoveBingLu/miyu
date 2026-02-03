@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { Search, MessageSquare, AlertCircle, Loader2, RefreshCw, X, ChevronDown, Info, Calendar, Database, Hash, Image as ImageIcon, Play, Video, Copy, ZoomIn, CheckSquare, Check, Edit, Link, Sparkles, FileText, FileArchive, Users } from 'lucide-react'
+import { Search, MessageSquare, AlertCircle, Loader2, RefreshCw, X, ChevronDown, Info, Calendar, Database, Hash, Image as ImageIcon, Play, Video, Copy, ZoomIn, CheckSquare, Check, Edit, Link, Sparkles, FileText, FileArchive, Users, Mic, CheckCircle, XCircle } from 'lucide-react'
 import { useChatStore } from '../stores/chatStore'
 import { useUpdateStatusStore } from '../stores/updateStatusStore'
 import ChatBackground from '../components/ChatBackground'
@@ -293,6 +293,15 @@ function ChatPage(_props: ChatPageProps) {
   const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number } | null>(null)
   const datePickerRef = useRef<HTMLDivElement>(null) // 日期选择器容器引用
   const dateButtonRef = useRef<HTMLButtonElement>(null) // 日期按钮引用
+  
+  // 批量语音转文字相关状态
+  const [isBatchTranscribing, setIsBatchTranscribing] = useState(false)
+  const [batchTranscribeProgress, setBatchTranscribeProgress] = useState({ current: 0, total: 0 })
+  const [showBatchConfirm, setShowBatchConfirm] = useState(false)
+  const [batchVoiceCount, setBatchVoiceCount] = useState(0) // 保存查询到的语音消息数量
+  const [showBatchProgress, setShowBatchProgress] = useState(false) // 显示进度对话框
+  const [showBatchResult, setShowBatchResult] = useState(false) // 显示结果对话框
+  const [batchResult, setBatchResult] = useState({ success: 0, fail: 0 }) // 转写结果
 
   // 检查图片密钥配置（XOR 和 AES 都需要配置）
   useEffect(() => {
@@ -646,6 +655,166 @@ function ChatPage(_props: ChatPageProps) {
       setIsJumpingToDate(false)
     }
   }, [selectedDate, currentSessionId, isJumpingToDate, setMessages, setHasMoreMessages])
+
+  // 批量语音转文字
+  const handleBatchTranscribe = useCallback(async () => {
+    if (!currentSessionId) {
+      alert('未选择会话')
+      return
+    }
+    
+    const session = sessions.find(s => s.username === currentSessionId)
+    
+    if (!session) {
+      alert('未找到当前会话')
+      return
+    }
+    
+    if (isBatchTranscribing) {
+      return
+    }
+
+    // 从数据库获取该会话的所有语音消息
+    const result = await window.electronAPI.chat.getAllVoiceMessages(currentSessionId)
+    
+    if (!result.success || !result.messages) {
+      alert(`获取语音消息失败: ${result.error || '未知错误'}`)
+      return
+    }
+
+    const voiceMessages = result.messages
+    
+    if (voiceMessages.length === 0) {
+      alert('当前会话没有语音消息')
+      return
+    }
+
+    // 保存语音消息数量
+    setBatchVoiceCount(voiceMessages.length)
+    
+    // 显示确认对话框
+    setShowBatchConfirm(true)
+  }, [sessions, currentSessionId, isBatchTranscribing])
+
+  // 确认批量转写
+  const confirmBatchTranscribe = useCallback(async () => {
+    setShowBatchConfirm(false)
+    
+    if (!currentSessionId) return
+    
+    const session = sessions.find(s => s.username === currentSessionId)
+    if (!session) return
+
+    // 从数据库获取所有语音消息
+    const result = await window.electronAPI.chat.getAllVoiceMessages(currentSessionId)
+    if (!result.success || !result.messages) {
+      alert(`获取语音消息失败: ${result.error || '未知错误'}`)
+      return
+    }
+
+    const voiceMessages = result.messages
+    
+    setIsBatchTranscribing(true)
+    setShowBatchProgress(true) // 显示进度对话框
+    setBatchTranscribeProgress({ current: 0, total: voiceMessages.length })
+
+    // 检查 STT 模式和模型
+    const sttMode = await window.electronAPI.config.get('sttMode') || 'cpu'
+    
+    let modelExists = false
+    if (sttMode === 'gpu') {
+      const whisperModelType = (await window.electronAPI.config.get('whisperModelType') as string) || 'small'
+      const modelStatus = await window.electronAPI.sttWhisper.checkModel(whisperModelType)
+      modelExists = modelStatus.exists
+      
+      if (!modelExists) {
+        alert(`Whisper ${whisperModelType} 模型未下载，请先在设置中下载模型`)
+        setIsBatchTranscribing(false)
+        setShowBatchProgress(false)
+        return
+      }
+    } else {
+      const modelStatus = await window.electronAPI.stt.getModelStatus()
+      modelExists = !!(modelStatus.success && modelStatus.exists)
+      
+      if (!modelExists) {
+        alert('SenseVoice 模型未下载，请先在设置中下载模型')
+        setIsBatchTranscribing(false)
+        setShowBatchProgress(false)
+        return
+      }
+    }
+
+    // 并发批量转写
+    let successCount = 0
+    let failCount = 0
+    let completedCount = 0
+    
+    // 并发数量限制（避免同时处理太多导致内存溢出）
+    const concurrency = 5
+    
+    // 转写单条语音的函数
+    const transcribeOne = async (msg: any) => {
+      try {
+        // 检查是否已有缓存
+        const cached = await window.electronAPI.stt.getCachedTranscript(session.username, msg.createTime)
+        
+        if (cached && cached.success && cached.transcript) {
+          return { success: true, cached: true }
+        }
+
+        // 获取语音数据
+        const result = await window.electronAPI.chat.getVoiceData(
+          session.username,
+          String(msg.localId),
+          msg.createTime
+        )
+
+        if (!result.success || !result.data) {
+          return { success: false }
+        }
+
+        // 转写
+        const transcribeResult = await window.electronAPI.stt.transcribe(
+          result.data,
+          session.username,
+          msg.createTime,
+          false
+        )
+
+        return { success: transcribeResult.success }
+      } catch (e) {
+        return { success: false }
+      }
+    }
+
+    // 使用 Promise.all 分批并发处理
+    for (let i = 0; i < voiceMessages.length; i += concurrency) {
+      const batch = voiceMessages.slice(i, i + concurrency)
+      
+      const results = await Promise.all(
+        batch.map(msg => transcribeOne(msg))
+      )
+
+      // 统计结果
+      results.forEach(result => {
+        if (result.success) {
+          successCount++
+        } else {
+          failCount++
+        }
+        completedCount++
+        setBatchTranscribeProgress({ current: completedCount, total: voiceMessages.length })
+      })
+    }
+
+    setIsBatchTranscribing(false)
+    setShowBatchProgress(false) // 隐藏进度对话框
+    
+    // 显示结果对话框
+    setBatchResult({ success: successCount, fail: failCount })
+    setShowBatchResult(true)
+  }, [sessions, currentSessionId])
 
   // 加载当前月份有消息的日期
   useEffect(() => {
@@ -1231,6 +1400,19 @@ function ChatPage(_props: ChatPageProps) {
                   )}
                 </div>
                 <button
+                  className="icon-btn batch-transcribe-btn"
+                  style={{ position: 'relative', zIndex: 10 }}
+                  onClick={handleBatchTranscribe}
+                  disabled={isBatchTranscribing || !currentSessionId}
+                  title={isBatchTranscribing ? `批量转写中 (${batchTranscribeProgress.current}/${batchTranscribeProgress.total})` : '批量语音转文字'}
+                >
+                  {isBatchTranscribing ? (
+                    <Loader2 size={18} className="spin" />
+                  ) : (
+                    <Mic size={18} />
+                  )}
+                </button>
+                <button
                   className={`icon-btn detail-btn ${showDetailPanel ? 'active' : ''}`}
                   onClick={toggleDetailPanel}
                   title="会话详情"
@@ -1684,6 +1866,123 @@ function ChatPage(_props: ChatPageProps) {
         </div>,
         document.body
       )}
+
+      {/* 批量转写确认对话框 */}
+      {showBatchConfirm && createPortal(
+        <div className="modal-overlay" onClick={() => setShowBatchConfirm(false)}>
+          <div className="modal-content batch-confirm-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <Mic size={20} />
+              <h3>批量语音转文字</h3>
+            </div>
+            <div className="modal-body">
+              <p>即将对当前会话的所有语音消息进行转写。</p>
+              <div className="batch-info">
+                <div className="info-item">
+                  <span className="label">语音消息数量:</span>
+                  <span className="value">{batchVoiceCount} 条</span>
+                </div>
+                <div className="info-item">
+                  <span className="label">预计耗时:</span>
+                  <span className="value">约 {Math.ceil(batchVoiceCount * 2 / 60)} 分钟</span>
+                </div>
+              </div>
+              <div className="batch-warning">
+                <AlertCircle size={16} />
+                <span>批量转写可能需要较长时间，转写过程中可以继续使用其他功能。已转写过的语音会自动跳过。</span>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => setShowBatchConfirm(false)}>
+                取消
+              </button>
+              <button className="btn-primary" onClick={confirmBatchTranscribe}>
+                <Mic size={16} />
+                开始转写
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* 批量转写进度对话框 */}
+      {showBatchProgress && createPortal(
+        <div className="modal-overlay">
+          <div className="modal-content batch-progress-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <Loader2 size={20} className="spin" />
+              <h3>正在转写...</h3>
+            </div>
+            <div className="modal-body">
+              <div className="progress-info">
+                <div className="progress-text">
+                  <span>已完成 {batchTranscribeProgress.current} / {batchTranscribeProgress.total} 条</span>
+                  <span className="progress-percent">
+                    {batchTranscribeProgress.total > 0 
+                      ? Math.round((batchTranscribeProgress.current / batchTranscribeProgress.total) * 100) 
+                      : 0}%
+                  </span>
+                </div>
+                <div className="progress-bar">
+                  <div 
+                    className="progress-fill" 
+                    style={{ 
+                      width: `${batchTranscribeProgress.total > 0 
+                        ? (batchTranscribeProgress.current / batchTranscribeProgress.total) * 100 
+                        : 0}%` 
+                    }}
+                  />
+                </div>
+              </div>
+              <div className="batch-tip">
+                <span>转写过程中可以继续使用其他功能</span>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* 批量转写结果对话框 */}
+      {showBatchResult && createPortal(
+        <div className="modal-overlay" onClick={() => setShowBatchResult(false)}>
+          <div className="modal-content batch-result-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <CheckCircle size={20} />
+              <h3>转写完成</h3>
+            </div>
+            <div className="modal-body">
+              <div className="result-summary">
+                <div className="result-item success">
+                  <CheckCircle size={18} />
+                  <span className="label">成功:</span>
+                  <span className="value">{batchResult.success} 条</span>
+                </div>
+                {batchResult.fail > 0 && (
+                  <div className="result-item fail">
+                    <XCircle size={18} />
+                    <span className="label">失败:</span>
+                    <span className="value">{batchResult.fail} 条</span>
+                  </div>
+                )}
+              </div>
+              {batchResult.fail > 0 && (
+                <div className="result-tip">
+                  <AlertCircle size={16} />
+                  <span>部分语音转写失败，可能是语音文件损坏或网络问题</span>
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn-primary" onClick={() => setShowBatchResult(false)}>
+                确定
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   )
 }
@@ -1831,15 +2130,6 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
     if (!message.emojiCdnUrl && !message.emojiMd5) {
       return
     }
-
-    console.log('[ChatPage] 准备下载表情:', {
-      md5: message.emojiMd5,
-      cdn: message.emojiCdnUrl,
-      productId: message.productId,
-      createTime: message.createTime,
-      hasCreateTime: !!message.createTime,
-      messageKeys: Object.keys(message)
-    })
 
     // 先检查缓存
     const cached = emojiDataUrlCache.get(cacheKey)
@@ -2095,44 +2385,98 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
     setSttError(null)
 
     try {
-      // 先检查模型是否已下载
-      console.log('[STT] 检查模型状态...')
-      const modelStatus = await window.electronAPI.stt.getModelStatus()
-      console.log('[STT] 模型状态:', modelStatus)
-      if (!modelStatus.success || !modelStatus.exists) {
-        if (window.confirm('语音识别模型未下载，是否立即下载？(约245MB)\n下载完成后将自动开始转写。')) {
-          setSttLoading(true)
-          setSttTranscript('准备下载模型...')
+      // 检查 STT 模式
+      const sttMode = await window.electronAPI.config.get('sttMode') || 'cpu'
+      console.log('[STT] 当前模式:', sttMode)
 
-          const removeProgress = window.electronAPI.stt.onDownloadProgress((p) => {
-            const pct = p.percent || 0
-            setSttTranscript(`正在下载模型... ${pct.toFixed(1)}%`)
-          })
+      // 根据模式检查对应的模型
+      let modelExists = false
+      let modelName = ''
+      
+      if (sttMode === 'gpu') {
+        // 检查 Whisper 模型
+        const whisperModelType = (await window.electronAPI.config.get('whisperModelType') as string) || 'small'
+        console.log('[ChatPage] 读取到的 Whisper 模型类型:', whisperModelType)
+        
+        const modelStatus = await window.electronAPI.sttWhisper.checkModel(whisperModelType)
+        modelExists = modelStatus.exists
+        modelName = `Whisper ${whisperModelType}`
+        
+        if (!modelExists) {
+          if (window.confirm(`Whisper ${whisperModelType} 模型未下载，是否立即下载？\n下载完成后将自动开始转写。`)) {
+            setSttLoading(true)
+            setSttTranscript('准备下载模型...')
 
-          try {
-            const dlResult = await window.electronAPI.stt.downloadModel()
-            removeProgress()
+            const removeProgress = window.electronAPI.sttWhisper.onDownloadProgress((p) => {
+              const pct = p.percent || 0
+              setSttTranscript(`正在下载模型... ${pct.toFixed(1)}%`)
+            })
 
-            if (dlResult.success) {
-              setSttTranscript('模型下载完成，正在初始化引擎...')
-              // 给予文件系统缓冲时间，避免刚下载完无法读取
-              await new Promise(r => setTimeout(r, 2000))
-              setSttLoading(false) // Reset checking
-              await handleTranscribeVoice(undefined, true)
-              return
-            } else {
-              setSttError(dlResult.error || '模型下载失败')
+            try {
+              const dlResult = await window.electronAPI.sttWhisper.downloadModel(whisperModelType)
+              removeProgress()
+
+              if (dlResult.success) {
+                setSttTranscript('模型下载完成，正在初始化引擎...')
+                await new Promise(r => setTimeout(r, 2000))
+                setSttLoading(false)
+                await handleTranscribeVoice(undefined, true)
+                return
+              } else {
+                setSttError(dlResult.error || '模型下载失败')
+                setSttTranscript(null)
+              }
+            } catch (e) {
+              removeProgress()
+              setSttError(`模型下载出错: ${e}`)
               setSttTranscript(null)
             }
-          } catch (e) {
-            removeProgress()
-            setSttError(`模型下载出错: ${e}`)
-            setSttTranscript(null)
           }
+          setSttLoading(false)
+          return
         }
-        setSttLoading(false)
-        return
+      } else {
+        // 检查 SenseVoice 模型
+        const modelStatus = await window.electronAPI.stt.getModelStatus()
+        modelExists = !!(modelStatus.success && modelStatus.exists)
+        modelName = 'SenseVoice'
+        
+        if (!modelExists) {
+          if (window.confirm('语音识别模型未下载，是否立即下载？(约245MB)\n下载完成后将自动开始转写。')) {
+            setSttLoading(true)
+            setSttTranscript('准备下载模型...')
+
+            const removeProgress = window.electronAPI.stt.onDownloadProgress((p) => {
+              const pct = p.percent || 0
+              setSttTranscript(`正在下载模型... ${pct.toFixed(1)}%`)
+            })
+
+            try {
+              const dlResult = await window.electronAPI.stt.downloadModel()
+              removeProgress()
+
+              if (dlResult.success) {
+                setSttTranscript('模型下载完成，正在初始化引擎...')
+                await new Promise(r => setTimeout(r, 2000))
+                setSttLoading(false)
+                await handleTranscribeVoice(undefined, true)
+                return
+              } else {
+                setSttError(dlResult.error || '模型下载失败')
+                setSttTranscript(null)
+              }
+            } catch (e) {
+              removeProgress()
+              setSttError(`模型下载出错: ${e}`)
+              setSttTranscript(null)
+            }
+          }
+          setSttLoading(false)
+          return
+        }
       }
+
+      console.log('[STT] 模型已就绪:', modelName)
 
       // 如果没有语音数据，先获取
       let wavBase64 = voiceDataUrl?.replace('data:audio/wav;base64,', '')
@@ -2155,17 +2499,18 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
         setVoiceDataUrl(`data:audio/wav;base64,${wavBase64}`)
       }
 
-      // 监听实时结果（缓存命中时不会触发）
-      // 监听实时结果（缓存命中时不会触发）
-      const removeListener = window.electronAPI.stt.onPartialResult((text) => {
-        setSttTranscript(text)
-      })
+      // 监听实时结果（仅 CPU 模式支持）
+      let removeListener: (() => void) | undefined
+      if (sttMode === 'cpu') {
+        removeListener = window.electronAPI.stt.onPartialResult((text) => {
+          setSttTranscript(text)
+        })
+      }
 
-      // 开始转写 - 传递 sessionId 和 createTime 用于缓存
       // 开始转写 - 传递 sessionId 和 createTime 用于缓存
       const result = await window.electronAPI.stt.transcribe(wavBase64, session.username, message.createTime, force)
 
-      removeListener()
+      removeListener?.()
 
       if (result.success && result.transcript) {
         setSttTranscript(result.transcript)
@@ -2794,6 +3139,7 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
       let thumbUrl = ''
       let appMsgType = ''
       let isPat = false
+      let textAnnouncement = ''
 
       try {
         const content = message.rawContent || message.parsedContent || ''
@@ -2808,6 +3154,7 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
         url = doc.querySelector('url')?.textContent || ''
         appMsgType = doc.querySelector('appmsg > type')?.textContent || doc.querySelector('type')?.textContent || ''
         isPat = appMsgType === '62' || Boolean(doc.querySelector('patinfo'))
+        textAnnouncement = doc.querySelector('textannouncement')?.textContent || ''
         // 尝试获取缩略图 (这里只是简单的解析，实际上可能需要解密或者下载)
         // 暂时只显示占位符，或者如果 url 是图片则显示
       } catch (e) {
@@ -2820,6 +3167,24 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
         return (
           <div className="bubble-content">
             <MessageContent content={text} />
+          </div>
+        )
+      }
+
+      // 群公告消息 (type=87)
+      if (appMsgType === '87') {
+        const announcementText = textAnnouncement || desc || '群公告'
+        return (
+          <div className="announcement-message">
+            <div className="announcement-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M22 17H2a3 3 0 0 0 3-3V9a7 7 0 0 1 14 0v5a3 3 0 0 0 3 3zm-8.27 4a2 2 0 0 1-3.46 0" />
+              </svg>
+            </div>
+            <div className="announcement-content">
+              <div className="announcement-label">群公告</div>
+              <div className="announcement-text">{announcementText}</div>
+            </div>
           </div>
         )
       }

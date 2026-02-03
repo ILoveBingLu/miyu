@@ -1846,6 +1846,70 @@
   }
 }
 
+// 群公告消息
+.announcement-message {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  background: var(--hover-color);
+  border-radius: 12px;
+  max-width: 320px;
+  
+  .announcement-icon {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #f59e42;
+    
+    svg {
+      width: 20px;
+      height: 20px;
+    }
+  }
+  
+  .announcement-content {
+    flex: 1;
+    min-width: 0;
+    
+    .announcement-label {
+      font-size: 12px;
+      color: var(--text-tertiary);
+      margin-bottom: 4px;
+    }
+    
+    .announcement-text {
+      font-size: 14px;
+      color: var(--text-primary);
+      line-height: 1.5;
+      word-break: break-word;
+      white-space: pre-wrap;
+    }
+  }
+}
+
+// 发送消息中的群公告样式适配
+.message-bubble.sent {
+  .announcement-message {
+    background: rgba(255, 255, 255, 0.15);
+    
+    .announcement-label {
+      color: rgba(255, 255, 255, 0.8);
+    }
+    
+    .announcement-text {
+      color: white;
+    }
+    
+    .announcement-icon {
+      color: white;
+    }
+  }
+}
+
 .sender-name {
   font-size: 12px;
   color: var(--text-tertiary);
@@ -3530,3 +3594,386 @@ video::-webkit-media-controls-fullscreen-button {
   }
 }
 
+
+
+// 批量转写按钮
+.batch-transcribe-btn {
+  &:hover:not(:disabled) {
+    color: var(--primary-color);
+  }
+}
+
+// 模态框基础样式
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.modal-content {
+  background: var(--bg-primary);
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  max-height: 90vh;
+  overflow-y: auto;
+  animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+// 批量转写确认对话框
+.batch-confirm-modal {
+  width: 480px;
+  max-width: 90vw;
+
+  .modal-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1.5rem;
+    border-bottom: 1px solid var(--border-color);
+
+    svg {
+      color: var(--primary-color);
+    }
+
+    h3 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+  }
+
+  .modal-body {
+    padding: 1.5rem;
+
+    p {
+      margin: 0 0 1rem 0;
+      font-size: 14px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    .batch-info {
+      background: var(--bg-tertiary);
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+
+      .info-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.5rem 0;
+
+        &:not(:last-child) {
+          border-bottom: 1px solid var(--border-color);
+        }
+
+        .label {
+          font-size: 13px;
+          color: var(--text-secondary);
+        }
+
+        .value {
+          font-size: 14px;
+          font-weight: 600;
+          color: var(--primary-color);
+        }
+      }
+    }
+
+    .batch-warning {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+      padding: 0.75rem;
+      background: var(--warning-bg);
+      border-radius: 8px;
+      border: 1px solid var(--warning-color);
+
+      svg {
+        flex-shrink: 0;
+        margin-top: 2px;
+        color: var(--warning-color);
+      }
+
+      span {
+        font-size: 13px;
+        color: var(--text-secondary);
+        line-height: 1.5;
+      }
+    }
+  }
+
+  .modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    padding: 1rem 1.5rem;
+    border-top: 1px solid var(--border-color);
+
+    button {
+      padding: 0.5rem 1.25rem;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      border: none;
+
+      &.btn-secondary {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+
+        &:hover {
+          background: var(--border-color);
+        }
+      }
+
+      &.btn-primary {
+        background: var(--primary-color);
+        color: white;
+
+        &:hover {
+          opacity: 0.9;
+        }
+      }
+    }
+  }
+}
+
+
+// 批量转写进度对话框
+.batch-progress-modal {
+  width: 420px;
+  max-width: 90vw;
+
+  .modal-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1.5rem;
+    border-bottom: 1px solid var(--border-color);
+
+    svg {
+      color: var(--primary-color);
+    }
+
+    h3 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+  }
+
+  .modal-body {
+    padding: 1.5rem;
+
+    .progress-info {
+      .progress-text {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.75rem;
+        font-size: 14px;
+        color: var(--text-secondary);
+
+        .progress-percent {
+          font-weight: 600;
+          color: var(--primary-color);
+          font-size: 16px;
+        }
+      }
+
+      .progress-bar {
+        height: 8px;
+        background: var(--bg-tertiary);
+        border-radius: 4px;
+        overflow: hidden;
+        margin-bottom: 1rem;
+
+        .progress-fill {
+          height: 100%;
+          background: linear-gradient(90deg, var(--primary-color), var(--primary-hover));
+          border-radius: 4px;
+          transition: width 0.3s ease;
+        }
+      }
+    }
+
+    .batch-tip {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.75rem;
+      background: var(--bg-tertiary);
+      border-radius: 8px;
+      
+      span {
+        font-size: 13px;
+        color: var(--text-secondary);
+      }
+    }
+  }
+}
+
+// 批量转写结果对话框
+.batch-result-modal {
+  width: 420px;
+  max-width: 90vw;
+
+  .modal-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1.5rem;
+    border-bottom: 1px solid var(--border-color);
+
+    svg {
+      color: var(--success-color);
+    }
+
+    h3 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+  }
+
+  .modal-body {
+    padding: 1.5rem;
+
+    .result-summary {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+
+      .result-item {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 1rem;
+        border-radius: 8px;
+        background: var(--bg-tertiary);
+
+        svg {
+          flex-shrink: 0;
+        }
+
+        .label {
+          font-size: 14px;
+          color: var(--text-secondary);
+        }
+
+        .value {
+          margin-left: auto;
+          font-size: 18px;
+          font-weight: 600;
+        }
+
+        &.success {
+          svg {
+            color: var(--success-color);
+          }
+
+          .value {
+            color: var(--success-color);
+          }
+        }
+
+        &.fail {
+          svg {
+            color: var(--error-color);
+          }
+
+          .value {
+            color: var(--error-color);
+          }
+        }
+      }
+    }
+
+    .result-tip {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+      padding: 0.75rem;
+      background: var(--warning-bg);
+      border-radius: 8px;
+      border: 1px solid var(--warning-color);
+
+      svg {
+        flex-shrink: 0;
+        margin-top: 2px;
+        color: var(--warning-color);
+      }
+
+      span {
+        font-size: 13px;
+        color: var(--text-secondary);
+        line-height: 1.5;
+      }
+    }
+  }
+
+  .modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    padding: 1rem 1.5rem;
+    border-top: 1px solid var(--border-color);
+
+    button {
+      padding: 0.5rem 1.5rem;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: none;
+
+      &.btn-primary {
+        background: var(--primary-color);
+        color: white;
+
+        &:hover {
+          background: var(--primary-hover);
+        }
+      }
+    }
+  }
+}

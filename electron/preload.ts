@@ -204,6 +204,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getContacts: () => ipcRenderer.invoke('chat:getContacts'),
     getMessages: (sessionId: string, offset?: number, limit?: number) =>
       ipcRenderer.invoke('chat:getMessages', sessionId, offset, limit),
+    getAllVoiceMessages: (sessionId: string) =>
+      ipcRenderer.invoke('chat:getAllVoiceMessages', sessionId),
     getContact: (username: string) => ipcRenderer.invoke('chat:getContact', username),
     getContactAvatar: (username: string) => ipcRenderer.invoke('chat:getContactAvatar', username),
     getMyAvatarUrl: () => ipcRenderer.invoke('chat:getMyAvatarUrl'),
@@ -308,6 +310,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getCachedTranscript: (sessionId: string, createTime: number) => ipcRenderer.invoke('stt:getCachedTranscript', sessionId, createTime),
     updateTranscript: (sessionId: string, createTime: number, transcript: string) => ipcRenderer.invoke('stt:updateTranscript', sessionId, createTime, transcript),
     clearModel: () => ipcRenderer.invoke('stt:clearModel')
+  },
+
+  // 语音转文字 - Whisper GPU 加速
+  sttWhisper: {
+    detectGPU: () => ipcRenderer.invoke('stt-whisper:detect-gpu'),
+    checkModel: (modelType: string) => ipcRenderer.invoke('stt-whisper:check-model', modelType),
+    downloadModel: (modelType: string) => ipcRenderer.invoke('stt-whisper:download-model', modelType),
+    clearModel: (modelType: string) => ipcRenderer.invoke('stt-whisper:clear-model', modelType),
+    transcribe: (wavData: Buffer, options: { modelType?: string; language?: string }) => 
+      ipcRenderer.invoke('stt-whisper:transcribe', wavData, options),
+    onDownloadProgress: (callback: (progress: { downloadedBytes: number; totalBytes?: number; percent?: number }) => void) => {
+      ipcRenderer.on('stt-whisper:download-progress', (_, progress) => callback(progress))
+      return () => ipcRenderer.removeAllListeners('stt-whisper:download-progress')
+    },
+    downloadGPUComponents: () => ipcRenderer.invoke('stt-whisper:download-gpu-components'),
+    checkGPUComponents: () => ipcRenderer.invoke('stt-whisper:check-gpu-components'),
+    onGPUDownloadProgress: (callback: (progress: { currentFile: string; fileProgress: number; overallProgress: number; completedFiles: number; totalFiles: number }) => void) => {
+      ipcRenderer.on('stt-whisper:gpu-download-progress', (_, progress) => callback(progress))
+      return () => ipcRenderer.removeAllListeners('stt-whisper:gpu-download-progress')
+    }
   },
 
   // AI 摘要

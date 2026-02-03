@@ -648,12 +648,36 @@
     opacity: 0;
     transform: translateX(-50%) translateY(-10px);
   }
-
   to {
     opacity: 1;
     transform: translateX(-50%) translateY(0);
   }
 }
+
+// 下载进度动画
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+
 
 @keyframes pulse {
 
