@@ -385,6 +385,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('ai:assistantChunk', (_, chunk) => callback(chunk))
       return () => ipcRenderer.removeAllListeners('ai:assistantChunk')
     }
+  },
+
+  assistant: {
+    getSchedule: () => ipcRenderer.invoke('assistant:getSchedule'),
+    setSchedule: (schedule: any) => ipcRenderer.invoke('assistant:setSchedule', schedule),
+    runScheduleNow: (override?: any) => ipcRenderer.invoke('assistant:runScheduleNow', override),
+    getReports: () => ipcRenderer.invoke('assistant:getReports'),
+    readReport: (reportId: string) => ipcRenderer.invoke('assistant:readReport', reportId)
   }
 })
 
