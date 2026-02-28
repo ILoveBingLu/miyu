@@ -67,7 +67,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     maximize: () => ipcRenderer.send('window:maximize'),
     close: () => ipcRenderer.send('window:close'),
     openChatWindow: () => ipcRenderer.invoke('window:openChatWindow'),
-    openMomentsWindow: () => ipcRenderer.invoke('window:openMomentsWindow'),
+    openMomentsWindow: (filterUsername?: string) => ipcRenderer.invoke('window:openMomentsWindow', filterUsername),
+    onMomentsFilterUser: (callback: (username: string) => void) => {
+      ipcRenderer.on('moments:filterUser', (_, username) => callback(username))
+      return () => ipcRenderer.removeAllListeners('moments:filterUser')
+    },
     openGroupAnalyticsWindow: () => ipcRenderer.invoke('window:openGroupAnalyticsWindow'),
     openAnnualReportWindow: (year: number) => ipcRenderer.invoke('window:openAnnualReportWindow', year),
     openAgreementWindow: () => ipcRenderer.invoke('window:openAgreementWindow'),
@@ -77,7 +81,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     isChatWindowOpen: () => ipcRenderer.invoke('window:isChatWindowOpen'),
     closeChatWindow: () => ipcRenderer.invoke('window:closeChatWindow'),
     setTitleBarOverlay: (options: { symbolColor: string }) => ipcRenderer.send('window:setTitleBarOverlay', options),
-    openImageViewerWindow: (imagePath: string, liveVideoPath?: string) => ipcRenderer.invoke('window:openImageViewerWindow', imagePath, liveVideoPath),
+    openImageViewerWindow: (imagePath: string, liveVideoPath?: string, imageList?: Array<{ imagePath: string; liveVideoPath?: string }>) => ipcRenderer.invoke('window:openImageViewerWindow', imagePath, liveVideoPath, imageList),
     openVideoPlayerWindow: (videoPath: string, videoWidth?: number, videoHeight?: number) => ipcRenderer.invoke('window:openVideoPlayerWindow', videoPath, videoWidth, videoHeight),
     openBrowserWindow: (url: string, title?: string) => ipcRenderer.invoke('window:openBrowserWindow', url, title),
     openAISummaryWindow: (sessionId: string, sessionName: string) => ipcRenderer.invoke('window:openAISummaryWindow', sessionId, sessionName),
@@ -89,6 +93,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onSplashFadeOut: (callback: () => void) => {
       ipcRenderer.on('splash:fadeOut', () => callback())
       return () => ipcRenderer.removeAllListeners('splash:fadeOut')
+    },
+    onImageListUpdate: (callback: (data: { imageList: Array<{ imagePath: string; liveVideoPath?: string }>, currentIndex: number }) => void) => {
+      const listener = (_: any, data: any) => callback(data)
+      ipcRenderer.on('imageViewer:setImageList', listener)
+      return () => { ipcRenderer.removeListener('imageViewer:setImageList', listener) }
     }
   },
 
@@ -196,8 +205,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   video: {
     getVideoInfo: (videoMd5: string) => ipcRenderer.invoke('video:getVideoInfo', videoMd5),
     readFile: (videoPath: string) => ipcRenderer.invoke('video:readFile', videoPath),
-    parseVideoMd5: (content: string) => ipcRenderer.invoke('video:parseVideoMd5', content)
+    parseVideoMd5: (content: string) => ipcRenderer.invoke('video:parseVideoMd5', content),
+    parseChannelVideo: (content: string) => ipcRenderer.invoke('video:parseChannelVideo', content),
+    downloadChannelVideo: (videoInfo: any, key?: string) => ipcRenderer.invoke('video:downloadChannelVideo', videoInfo, key),
+    onDownloadProgress: (callback: (progress: any) => void) => {
+      const listener = (_: any, progress: any) => callback(progress)
+      ipcRenderer.on('video:downloadProgress', listener)
+      return () => ipcRenderer.removeListener('video:downloadProgress', listener)
+    }
   },
+
 
   // 图片密钥获取
   imageKey: {
@@ -256,9 +273,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('sns:proxyImage', params),
     downloadImage: (params: { url: string; key?: string | number }) =>
       ipcRenderer.invoke('sns:downloadImage', params),
+    downloadEmoji: (params: { url: string; encryptUrl?: string; aesKey?: string }) =>
+      ipcRenderer.invoke('sns:downloadEmoji', params),
     writeExportFile: (filePath: string, content: string) =>
       ipcRenderer.invoke('sns:writeExportFile', filePath, content),
-    saveMediaToDir: (params: { url: string; key?: string | number; outputDir: string; index: number }) =>
+    saveMediaToDir: (params: { url: string; key?: string | number; outputDir: string; index: number; md5?: string; isAvatar?: boolean; username?: string; isEmoji?: boolean; encryptUrl?: string; aesKey?: string }) =>
       ipcRenderer.invoke('sns:saveMediaToDir', params)
   },
 

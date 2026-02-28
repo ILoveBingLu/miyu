@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { Search, MessageSquare, AlertCircle, Loader2, RefreshCw, X, ChevronDown, Info, Calendar, Database, Hash, Image as ImageIcon, Play, Video, Copy, ZoomIn, CheckSquare, Check, Edit, Link, Sparkles, FileText, FileArchive, Users, Mic, CheckCircle, XCircle } from 'lucide-react'
+import { Search, MessageSquare, AlertCircle, Loader2, RefreshCw, X, ChevronDown, Info, Calendar, Database, Hash, Image as ImageIcon, Play, Video, Copy, ZoomIn, CheckSquare, Check, Edit, Link, Sparkles, FileText, FileArchive, Users, Mic, CheckCircle, XCircle, Download, Phone, Aperture, MapPin, UserRound } from 'lucide-react'
 import { useChatStore } from '../stores/chatStore'
 import { useUpdateStatusStore } from '../stores/updateStatusStore'
 import ChatBackground from '../components/ChatBackground'
@@ -1388,6 +1388,15 @@ function ChatPage(_props: ChatPageProps) {
                 >
                   <RefreshCw size={18} className={isRefreshingMessages || isUpdating ? 'spin' : ''} />
                 </button>
+                {!isGroupChat(currentSession.username) && (
+                  <button
+                    className="icon-btn moments-btn"
+                    onClick={() => window.electronAPI.window.openMomentsWindow(currentSession.username)}
+                    title="查看朋友圈"
+                  >
+                    <Aperture size={18} />
+                  </button>
+                )}
                 <button
                   className="icon-btn ai-summary-btn"
                   onClick={() => {
@@ -2361,6 +2370,81 @@ const videoInfoCache = new Map<string, {
 // 最后一次增量更新时间戳
 let lastIncrementalUpdateTime = 0
 
+// 视频号卡片组件
+function ChannelVideoCard({ info }: { info: { title: string; author: string; avatar?: string; thumbUrl?: string; coverUrl?: string; duration?: number } }) {
+  return (
+    <div className="channel-video-card">
+      <div className="channel-video-cover">
+        {info.coverUrl || info.thumbUrl ? (
+          <img src={info.coverUrl || info.thumbUrl} alt="" />
+        ) : (
+          <div className="channel-video-cover-placeholder"><Video size={24} /></div>
+        )}
+        {info.duration && (
+          <span className="channel-video-duration">{Math.floor(info.duration / 60)}:{String(info.duration % 60).padStart(2, '0')}</span>
+        )}
+      </div>
+      <div className="channel-video-info">
+        <div className="channel-video-title">{info.title}</div>
+        <div className="channel-video-author">
+          {info.avatar && <img src={info.avatar} alt="" className="channel-video-avatar" />}
+          <span>{info.author}</span>
+          <span className="card-badge">视频号</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function LinkThumb({ imageMd5, sessionId }: { imageMd5: string; sessionId: string }) {
+  const [src, setSrc] = useState('')
+  useEffect(() => {
+    let cancelled = false
+    window.electronAPI.image.decrypt({ sessionId, imageMd5 }).then(r => {
+      if (!cancelled && r.success && r.localPath) setSrc('file://' + r.localPath)
+    })
+    return () => { cancelled = true }
+  }, [imageMd5, sessionId])
+  if (!src) return <div className="link-thumb-placeholder"><Link size={24} /></div>
+  return <img className="link-thumb" src={src} alt="" />
+}
+
+function MiniProgramThumb({ imageMd5, sessionId, fallbackUrl, iconUrl }: { imageMd5: string; sessionId: string; fallbackUrl?: string; iconUrl?: string }) {
+  const [src, setSrc] = useState('')
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    window.electronAPI.image.decrypt({ sessionId, imageMd5 }).then(r => {
+      if (cancelled) return
+      if (r.success && r.localPath) setSrc('file://' + r.localPath)
+      else setFailed(true)
+    }).catch(() => { if (!cancelled) setFailed(true) })
+    return () => { cancelled = true }
+  }, [imageMd5, sessionId])
+  const imgSrc = src || (failed ? fallbackUrl : '')
+  if (imgSrc) return <img className="miniprogram-cover-img" src={imgSrc} alt="" referrerPolicy="no-referrer" />
+  if (failed && iconUrl) return <div className="miniprogram-cover-icon"><img src={iconUrl} alt="" referrerPolicy="no-referrer" /></div>
+  if (failed) return <div className="miniprogram-cover-placeholder" />
+  return null
+}
+
+function LinkSource({ username, name, badge }: { username: string; name: string; badge?: string }) {
+  const [avatar, setAvatar] = useState('')
+  useEffect(() => {
+    if (!username) return
+    window.electronAPI.chat.getContactAvatar(username).then(r => {
+      if (r?.avatarUrl) setAvatar(r.avatarUrl)
+    })
+  }, [username])
+  return (
+    <div className="link-source">
+      {avatar && <img className="link-source-avatar" src={avatar} alt="" referrerPolicy="no-referrer" />}
+      <span>{name}</span>
+      {badge && <span className="card-badge">{badge}</span>}
+    </div>
+  )
+}
+
 // 消息气泡组件
 function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, hasImageKey, onContextMenu, isSelected, quoteStyle = 'default' }: {
   message: Message;
@@ -2440,6 +2524,12 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
   const quotedImageCacheKey = message.quotedImageMd5 || ''
   const [quotedImageLocalPath, setQuotedImageLocalPath] = useState<string | undefined>(
     () => quotedImageCacheKey ? imageDataUrlCache.get(quotedImageCacheKey) : undefined
+  )
+
+  // 引用表情包缓存
+  const quotedEmojiCacheKey = message.quotedEmojiMd5 || ''
+  const [quotedEmojiLocalPath, setQuotedEmojiLocalPath] = useState<string | undefined>(
+    () => quotedEmojiCacheKey ? emojiDataUrlCache.get(quotedEmojiCacheKey) : undefined
   )
 
   const formatTime = (timestamp: number): string => {
@@ -3107,6 +3197,28 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
     enqueueDecrypt(doDecrypt)
   }, [message.quotedImageMd5, quotedImageLocalPath, session.username])
 
+  // 引用表情包自动下载
+  useEffect(() => {
+    if (!message.quotedEmojiMd5 && !message.quotedEmojiCdnUrl) return
+    if (quotedEmojiLocalPath) return
+
+    const cdnUrl = message.quotedEmojiCdnUrl || ''
+    const md5 = message.quotedEmojiMd5 || ''
+
+    // 先检查缓存
+    if (md5 && emojiDataUrlCache.has(md5)) {
+      setQuotedEmojiLocalPath(emojiDataUrlCache.get(md5))
+      return
+    }
+
+    window.electronAPI.chat.downloadEmoji(cdnUrl, md5).then((result: any) => {
+      if (result.success && result.localPath) {
+        if (md5) emojiDataUrlCache.set(md5, result.localPath)
+        setQuotedEmojiLocalPath(result.localPath)
+      }
+    }).catch(() => {})
+  }, [message.quotedEmojiMd5, message.quotedEmojiCdnUrl, quotedEmojiLocalPath])
+
   if (isSystem) {
     // 系统类消息：包含“拍一拍”等 appmsg(type=62)
     let systemText = message.parsedContent || '[系统消息]'
@@ -3150,11 +3262,11 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
     if (hasQuote && quoteStyle === 'default') {
       return (
         <div className="bubble-content">
-          <div className="quoted-message">
+          <div className="quoted-message" onClick={(quotedImageLocalPath || quotedEmojiLocalPath) ? (e) => { e.stopPropagation(); window.electronAPI.window.openImageViewerWindow((quotedImageLocalPath || quotedEmojiLocalPath)!) } : undefined} style={(quotedImageLocalPath || quotedEmojiLocalPath) ? { cursor: 'pointer' } : undefined}>
             <div className="quoted-message-content">
               <div className="quoted-text-container">
                 {message.quotedSender && <span className="quoted-sender">{message.quotedSender}</span>}
-                <span className="quoted-text">{message.quotedContent}</span>
+                <span className="quoted-text">{(quotedImageLocalPath || quotedEmojiLocalPath) ? null : message.quotedContent}</span>
               </div>
               {quotedImageLocalPath && (
                 <div className="quoted-image-container">
@@ -3162,10 +3274,15 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
                     src={quotedImageLocalPath}
                     alt="引用图片"
                     className="quoted-image-thumb"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      window.electronAPI.window.openImageViewerWindow(quotedImageLocalPath)
-                    }}
+                  />
+                </div>
+              )}
+              {!quotedImageLocalPath && quotedEmojiLocalPath && (
+                <div className="quoted-image-container">
+                  <img
+                    src={quotedEmojiLocalPath}
+                    alt="表情"
+                    className="quoted-image-thumb"
                   />
                 </div>
               )}
@@ -3197,10 +3314,9 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
                 src={imageLocalPath}
                 alt="图片"
                 className="image-message"
-                onClick={async () => {
-                  const liveVideo = await requestImageDecrypt(true)
+                onClick={() => {
                   if (imageLocalPath) {
-                    window.electronAPI.window.openImageViewerWindow(imageLocalPath, liveVideo || imageLiveVideoPath)
+                    window.electronAPI.window.openImageViewerWindow(imageLocalPath, imageLiveVideoPath)
                   }
                 }}
                 onLoad={() => setImageError(false)}
@@ -3514,6 +3630,10 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
       let appMsgType = ''
       let isPat = false
       let textAnnouncement = ''
+      let cdnthumbmd5 = ''
+      let sourcedisplayname = ''
+      let sourceusername = ''
+      let coverPicUrl = ''
 
       try {
         const content = message.rawContent || message.parsedContent || ''
@@ -3529,8 +3649,10 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
         appMsgType = doc.querySelector('appmsg > type')?.textContent || doc.querySelector('type')?.textContent || ''
         isPat = appMsgType === '62' || Boolean(doc.querySelector('patinfo'))
         textAnnouncement = doc.querySelector('textannouncement')?.textContent || ''
-        // 尝试获取缩略图 (这里只是简单的解析，实际上可能需要解密或者下载)
-        // 暂时只显示占位符，或者如果 url 是图片则显示
+        cdnthumbmd5 = doc.querySelector('cdnthumbmd5')?.textContent || ''
+        sourcedisplayname = doc.querySelector('sourcedisplayname')?.textContent || ''
+        sourceusername = doc.querySelector('sourceusername')?.textContent || ''
+        coverPicUrl = doc.querySelector('coverpicimageurl')?.textContent || ''
       } catch (e) {
         console.error('解析 AppMsg 失败:', e)
       }
@@ -3743,6 +3865,175 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
         }
       }
 
+      // 红包消息 (type=2001)
+      if (appMsgType === '2001') {
+        try {
+          const content = message.rawContent || message.parsedContent || ''
+          const xmlStr = content.includes('<msg>') ? content.substring(content.indexOf('<msg>')) : content
+          const parser = new DOMParser()
+          const doc = parser.parseFromString(xmlStr, 'text/xml')
+          const greeting = doc.querySelector('receivertitle')?.textContent || doc.querySelector('sendertitle')?.textContent || ''
+          return (
+            <div className="hongbao-message">
+              <div className="hongbao-icon">
+                <svg width="32" height="32" viewBox="0 0 40 40" fill="none">
+                  <rect x="4" y="6" width="32" height="28" rx="4" fill="white" fillOpacity="0.3" />
+                  <rect x="4" y="6" width="32" height="14" rx="4" fill="white" fillOpacity="0.2" />
+                  <circle cx="20" cy="20" r="6" fill="white" fillOpacity="0.4" />
+                  <text x="20" y="24" textAnchor="middle" fill="white" fontSize="12" fontWeight="bold">¥</text>
+                </svg>
+              </div>
+              <div className="hongbao-info">
+                <div className="hongbao-greeting">{greeting || '恭喜发财，大吉大利'}</div>
+                <div className="hongbao-label">微信红包</div>
+              </div>
+            </div>
+          )
+        } catch {
+          return <div className="bubble-content"><MessageContent content={message.parsedContent} /></div>
+        }
+      }
+
+      // 微信礼物 (type=115)
+      if (appMsgType === '115') {
+        try {
+          const content = message.rawContent || ''
+          const xmlStr = content.includes('<msg>') ? content.substring(content.indexOf('<msg>')) : content
+          const parser = new DOMParser()
+          const doc = parser.parseFromString(xmlStr, 'text/xml')
+          const wish = doc.querySelector('wishmessage')?.textContent || '送你一份心意'
+          const skutitle = doc.querySelector('skutitle')?.textContent || ''
+          const skuimg = doc.querySelector('skuimgurl')?.textContent || ''
+          const skuprice = doc.querySelector('skuprice')?.textContent || ''
+          const priceYuan = skuprice ? (parseInt(skuprice) / 100).toFixed(2) : ''
+          return (
+            <div className="gift-message">
+              {skuimg && <img className="gift-img" src={skuimg} alt="" referrerPolicy="no-referrer" />}
+              <div className="gift-info">
+                <div className="gift-wish">{wish}</div>
+                {skutitle && <div className="gift-name">{skutitle}</div>}
+                {priceYuan && <div className="gift-price">¥{priceYuan}</div>}
+                <div className="gift-label">微信礼物</div>
+              </div>
+            </div>
+          )
+        } catch {
+          return <div className="bubble-content"><MessageContent content={message.parsedContent} /></div>
+        }
+      }
+
+      // 音乐分享 (type=3)
+      if (appMsgType === '3') {
+        try {
+          const content = message.rawContent || ''
+          const xmlStr = content.includes('<msg>') ? content.substring(content.indexOf('<msg>')) : content
+          const parser = new DOMParser()
+          const doc = parser.parseFromString(xmlStr, 'text/xml')
+          const title = doc.querySelector('title')?.textContent || ''
+          const des = doc.querySelector('des')?.textContent || ''
+          const url = doc.querySelector('url')?.textContent || ''
+          const albumUrl = doc.querySelector('songalbumurl')?.textContent || ''
+          const appname = doc.querySelector('appname')?.textContent || ''
+          return (
+            <div className="music-message" onClick={() => url && window.electronAPI.shell.openExternal(url)}>
+              <div className="music-cover">
+                {albumUrl ? <img src={albumUrl} alt="" referrerPolicy="no-referrer" /> : <Play size={24} />}
+              </div>
+              <div className="music-info">
+                <div className="music-title">{title || '未知歌曲'}</div>
+                {des && <div className="music-artist">{des}</div>}
+                {appname && <div className="music-source">{appname}</div>}
+              </div>
+            </div>
+          )
+        } catch {
+          return <div className="bubble-content"><MessageContent content={message.parsedContent} /></div>
+        }
+      }
+
+      // 视频号消息 (type=51)
+      if (appMsgType === '51') {
+        try {
+          const content = message.rawContent || message.parsedContent || ''
+          const xmlStr = content.includes('<msg>') ? content.substring(content.indexOf('<msg>')) : content
+          const p = new DOMParser()
+          const d = p.parseFromString(xmlStr, 'text/xml')
+          const finder = d.querySelector('finderFeed')
+          if (finder) {
+            const getCDATA = (tag: string) => finder.querySelector(tag)?.textContent?.trim() || ''
+            const media = finder.querySelector('mediaList media')
+            const getMediaCDATA = (tag: string) => media?.querySelector(tag)?.textContent?.trim() || ''
+            const channelInfo = {
+              title: getCDATA('desc') || '视频号视频',
+              author: getCDATA('nickname'),
+              avatar: getCDATA('avatar'),
+              thumbUrl: getMediaCDATA('thumbUrl'),
+              coverUrl: getMediaCDATA('coverUrl'),
+              duration: parseInt(getMediaCDATA('videoPlayDuration')) || undefined,
+            }
+            return <ChannelVideoCard info={channelInfo} />
+          }
+        } catch (e) {
+          // fallthrough to generic link
+        }
+      }
+
+      // 小程序消息 (type=33 或 type=36)
+      if (appMsgType === '33' || appMsgType === '36') {
+        try {
+          const content = message.rawContent || message.parsedContent || ''
+          const xmlStr = content.includes('<msg>') ? content.substring(content.indexOf('<msg>')) : content
+          const p = new DOMParser()
+          const d = p.parseFromString(xmlStr, 'text/xml')
+          const weappinfo = d.querySelector('weappinfo')
+          const weappiconurl = weappinfo?.querySelector('weappiconurl')?.textContent?.trim() || ''
+          const thumbRawUrl = weappinfo?.querySelector('weapppagethumbrawurl')?.textContent?.trim() || ''
+
+          return (
+            <div className="miniprogram-card">
+              <div className="miniprogram-header">
+                {weappiconurl ? (
+                  <img className="miniprogram-icon" src={weappiconurl} alt="" referrerPolicy="no-referrer" />
+                ) : (
+                  <div className="miniprogram-icon-placeholder" />
+                )}
+                <span className="miniprogram-name">{sourcedisplayname || '小程序'}</span>
+              </div>
+              <div className="miniprogram-title">{title}</div>
+              <div className="miniprogram-cover">
+                {cdnthumbmd5 && session ? (
+                  <MiniProgramThumb imageMd5={cdnthumbmd5} sessionId={session.username} fallbackUrl={thumbRawUrl} iconUrl={weappiconurl} />
+                ) : thumbRawUrl ? (
+                  <img className="miniprogram-cover-img" src={thumbRawUrl} alt="" referrerPolicy="no-referrer" />
+                ) : weappiconurl ? (
+                  <div className="miniprogram-cover-icon"><img src={weappiconurl} alt="" referrerPolicy="no-referrer" /></div>
+                ) : (
+                  <div className="miniprogram-cover-placeholder" />
+                )}
+              </div>
+              <div className="miniprogram-footer">
+                <svg className="miniprogram-logo" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="7" cy="12" r="3" /><circle cx="17" cy="12" r="3" /><path d="M10 12h4" /></svg>
+                <span>小程序</span>
+              </div>
+            </div>
+          )
+        } catch (e) {
+          // fallthrough to generic link
+        }
+      }
+
+      if (url && coverPicUrl && appMsgType === '5') {
+        return (
+          <div className="link-message link-message--cover" onClick={(e) => { e.stopPropagation(); window.electronAPI.window.openBrowserWindow(url, title) }}>
+            <div className="link-cover">
+              <img src={coverPicUrl} alt="" referrerPolicy="no-referrer" />
+            </div>
+            <div className="link-header"><span className="link-title">{title}</span></div>
+            {sourcedisplayname ? <LinkSource username={sourceusername} name={sourcedisplayname} badge="公众号图文" /> : <div className="link-source"><span className="card-badge">公众号图文</span></div>}
+          </div>
+        )
+      }
+
       if (url) {
         return (
           <div
@@ -3758,13 +4049,81 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
             </div>
             <div className="link-body">
               <div className="link-desc">{desc}</div>
-              <div className="link-thumb-placeholder">
-                <Link size={24} />
-              </div>
+              {cdnthumbmd5 && session ? (
+                <LinkThumb imageMd5={cdnthumbmd5} sessionId={session.username} />
+              ) : (
+                <div className="link-thumb-placeholder"><Link size={24} /></div>
+              )}
             </div>
+            {sourcedisplayname && <LinkSource username={sourceusername} name={sourcedisplayname} badge="公众号文章" />}
           </div>
         )
       }
+    }
+
+    // 名片消息
+    if (message.localType === 42) {
+      const raw = message.rawContent || ''
+      const nickname = raw.match(/nickname="([^"]*)"/)?.[1] || '未知'
+      const avatar = raw.match(/bigheadimgurl="([^"]*)"/)?.[1] || raw.match(/smallheadimgurl="([^"]*)"/)?.[1]
+      const alias = raw.match(/alias="([^"]*)"/)?.[1]
+      const province = raw.match(/province="([^"]*)"/)?.[1]
+      return (
+        <div className="contact-card-message">
+          <div className="contact-card-avatar">
+            {avatar ? <img src={avatar} alt="" referrerPolicy="no-referrer" /> : <UserRound size={24} />}
+          </div>
+          <div className="contact-card-info">
+            <div className="contact-card-name">{nickname}</div>
+            {(alias || province) && <div className="contact-card-detail">{[alias, province].filter(Boolean).join(' · ')}</div>}
+          </div>
+          <div className="contact-card-badge">个人名片</div>
+        </div>
+      )
+    }
+
+    // 位置消息
+    if (message.localType === 48) {
+      const raw = message.rawContent || ''
+      const poiname = raw.match(/poiname="([^"]*)"/)?.[1] || ''
+      const label = raw.match(/label="([^"]*)"/)?.[1] || ''
+      const lat = parseFloat(raw.match(/x="([^"]*)"/)?.[1] || '0')
+      const lng = parseFloat(raw.match(/y="([^"]*)"/)?.[1] || '0')
+      const zoom = 15
+      const n = Math.pow(2, zoom)
+      const tileX = Math.floor((lng + 180) / 360 * n)
+      const tileY = Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * n)
+      const tileUrl = `https://webrd01.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x=${tileX}&y=${tileY}&z=${zoom}`
+      return (
+        <div className="location-message" onClick={() => window.electronAPI.shell.openExternal(`https://uri.amap.com/marker?position=${lng},${lat}&name=${encodeURIComponent(poiname || label)}`)}>
+          <div className="location-text">
+            <MapPin size={16} className="location-icon" />
+            <div className="location-info">
+              {poiname && <div className="location-name">{poiname}</div>}
+              {label && <div className="location-label">{label}</div>}
+            </div>
+          </div>
+          {lat !== 0 && lng !== 0 && (
+            <div className="location-map">
+              <img src={tileUrl} alt="" referrerPolicy="no-referrer" />
+              <div className="location-pin"><MapPin size={20} fill="#e25b4a" color="#fff" /></div>
+            </div>
+          )}
+        </div>
+      )
+    }
+
+    // 通话消息
+    if (message.localType === 50) {
+      const raw = message.rawContent || ''
+      const isVideoCall = /<room_type>0<\/room_type>/.test(raw)
+      const Icon = isVideoCall ? Video : Phone
+      return (
+        <div className="bubble-content" style={{ display: 'flex', alignItems: 'center', gap: 6, flexDirection: isSent ? 'row-reverse' : 'row' }}>
+          <Icon size={16} style={{ transform: isSent ? 'scaleX(-1)' : undefined }} />
+          <span>{message.parsedContent}</span>
+        </div>
+      )
     }
 
     // 调试非文本类型的未适配消息
@@ -3823,20 +4182,24 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
           {/* 引用消息 - 移至下方，单行显示 */}
           {hasQuote && quoteStyle === 'wechat' && (
             <div className="bubble-quote">
-              <div className="quote-content">
+              <div className="quote-content" onClick={(quotedImageLocalPath || quotedEmojiLocalPath) ? (e) => { e.stopPropagation(); window.electronAPI.window.openImageViewerWindow((quotedImageLocalPath || quotedEmojiLocalPath)!) } : undefined} style={(quotedImageLocalPath || quotedEmojiLocalPath) ? { cursor: 'pointer' } : undefined}>
                 <span className="quote-text">
                   {(() => {
-                    // 尝试获取引用发送者：优先使用字段值，否则尝试从 xml 解析
                     let sender = message.quotedSender
                     if (!sender && message.rawContent) {
                       const match = message.rawContent.match(/<displayname>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/displayname>/)
                       if (match) sender = match[1]
                     }
-
                     return sender ? <span className="quote-sender">{sender}: </span> : null
                   })()}
-                  {message.quotedContent}
+                  {(quotedImageLocalPath || quotedEmojiLocalPath) ? null : message.quotedContent}
                 </span>
+                {quotedImageLocalPath && (
+                  <img src={quotedImageLocalPath} alt="" className="quote-image-thumb" />
+                )}
+                {!quotedImageLocalPath && quotedEmojiLocalPath && (
+                  <img src={quotedEmojiLocalPath} alt="表情" className="quote-image-thumb" />
+                )}
               </div>
             </div>
           )}

@@ -1,7 +1,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { ZoomIn, ZoomOut, RotateCw, RotateCcw } from 'lucide-react'
+import { ZoomIn, ZoomOut, RotateCw, RotateCcw, ChevronLeft, ChevronRight } from 'lucide-react'
 import { LivePhotoIcon } from '../components/LivePhotoIcon'
 import './ImageWindow.scss'
 
@@ -9,6 +9,16 @@ export default function ImageWindow() {
     const [searchParams] = useSearchParams()
     const imagePath = searchParams.get('imagePath')
     const liveVideoPath = searchParams.get('liveVideoPath')
+
+    // 图片列表导航状态
+    const [imageList, setImageList] = useState<Array<{ imagePath: string; liveVideoPath?: string }>>([])
+    const [currentIndex, setCurrentIndex] = useState(0)
+
+    const activeImage = imageList.length > 0 ? imageList[currentIndex] : null
+    const currentImagePath = activeImage?.imagePath || imagePath
+    // 多图模式下只用列表中的 liveVideoPath，不回退到 URL 参数，避免非实况图也显示实况按钮
+    const currentLiveVideoPath = imageList.length > 0 ? activeImage?.liveVideoPath : liveVideoPath
+
     const [scale, setScale] = useState(1)
     const [rotation, setRotation] = useState(0)
     const [position, setPosition] = useState({ x: 0, y: 0 })
@@ -48,7 +58,7 @@ export default function ImageWindow() {
 
     // 播放 Live Photo
     const handlePlayLiveVideo = useCallback(() => {
-        if (liveVideoPath && !isPlayingLive) {
+        if (currentLiveVideoPath && !isPlayingLive) {
             setIsPlayingLive(true)
             // 播放视频
             if (videoRef.current) {
@@ -56,7 +66,7 @@ export default function ImageWindow() {
                 videoRef.current.play()
             }
         }
-    }, [liveVideoPath, isPlayingLive])
+    }, [currentLiveVideoPath, isPlayingLive])
 
     // 视频真正开始播放（画面就绪）
     const handleVideoPlaying = useCallback(() => {
@@ -71,6 +81,32 @@ export default function ImageWindow() {
             setIsPlayingLive(false)
         }, 300)
     }, [])
+
+    // 监听主进程发送的图片列表
+    useEffect(() => {
+        const cleanup = window.electronAPI?.window?.onImageListUpdate?.((data) => {
+            setImageList(data.imageList)
+            setCurrentIndex(data.currentIndex)
+        })
+        return () => cleanup?.()
+    }, [])
+
+    // 导航函数
+    const canGoPrev = imageList.length > 0 && currentIndex > 0
+    const canGoNext = imageList.length > 0 && currentIndex < imageList.length - 1
+
+    const goToImage = useCallback((newIndex: number) => {
+        if (newIndex < 0 || newIndex >= imageList.length) return
+        setCurrentIndex(newIndex)
+        setScale(1)
+        setRotation(0)
+        setPosition({ x: 0, y: 0 })
+        setIsPlayingLive(false)
+        setIsVideoVisible(false)
+    }, [imageList.length])
+
+    const goPrev = useCallback(() => { if (canGoPrev) goToImage(currentIndex - 1) }, [canGoPrev, currentIndex, goToImage])
+    const goNext = useCallback(() => { if (canGoNext) goToImage(currentIndex + 1) }, [canGoNext, currentIndex, goToImage])
 
     // 监听窗口大小变化
     useEffect(() => {
@@ -113,20 +149,18 @@ export default function ImageWindow() {
 
         setNaturalSize({ width: naturalWidth, height: naturalHeight })
 
-        // 请求调整窗口大小
-        // 目标：让视口内容区域(viewport)能容纳图片
-        // viewport = window - titlebar(40px)
-        const desiredWidth = naturalWidth
-        const desiredHeight = naturalHeight + 40 // +40px TitleBar
-
-        // 调用主进程调整窗口
-        // @ts-ignore
-        window.electronAPI?.window?.resizeContent?.(desiredWidth, desiredHeight)
+        // 多图模式下不调整窗口大小，避免切换时窗口跳动
+        if (imageList.length <= 1) {
+            const desiredWidth = naturalWidth
+            const desiredHeight = naturalHeight + 40
+            // @ts-ignore
+            window.electronAPI?.window?.resizeContent?.(desiredWidth, desiredHeight)
+        }
 
         // 重置缩放和位置
         setScale(1)
         setPosition({ x: 0, y: 0 })
-    }, [])
+    }, [imageList.length])
 
     // Use a ref to access latest state in event listeners without re-binding
     const metaRef = useRef({
@@ -319,18 +353,20 @@ export default function ImageWindow() {
             if (e.key === '-') handleZoomOut()
             if (e.key === 'r' || e.key === 'R') handleRotate()
             if (e.key === '0') handleReset()
-            if (e.key === ' ' && liveVideoPath) {
+            if (e.key === ' ' && currentLiveVideoPath) {
                 e.preventDefault()
                 handlePlayLiveVideo()
             }
+            if (e.key === 'ArrowLeft') { e.preventDefault(); goPrev() }
+            if (e.key === 'ArrowRight') { e.preventDefault(); goNext() }
         }
         window.addEventListener('keydown', handleKeyDown)
         return () => window.removeEventListener('keydown', handleKeyDown)
-    }, [handleReset, liveVideoPath, isPlayingLive, handlePlayLiveVideo])
+    }, [handleReset, currentLiveVideoPath, isPlayingLive, handlePlayLiveVideo, goPrev, goNext])
 
-    const hasLiveVideo = !!liveVideoPath
+    const hasLiveVideo = !!currentLiveVideoPath
 
-    if (!imagePath) {
+    if (!currentImagePath) {
         return (
             <div className="image-window-empty">
                 <span>无效的图片路径</span>
@@ -372,6 +408,12 @@ export default function ImageWindow() {
                     <div className="divider"></div>
                     <button onClick={handleRotateCcw} title="逆时针旋转"><RotateCcw size={16} /></button>
                     <button onClick={handleRotate} title="顺时针旋转 (R)"><RotateCw size={16} /></button>
+                    {imageList.length > 1 && (
+                        <>
+                            <div className="divider"></div>
+                            <span className="image-counter">{currentIndex + 1} / {imageList.length}</span>
+                        </>
+                    )}
                 </div>
             </div>
 
@@ -389,7 +431,7 @@ export default function ImageWindow() {
                     }}
                 >
                     <img
-                        src={imagePath}
+                        src={currentImagePath}
                         alt="Preview"
                         className={isPannable ? 'pannable' : ''}
                         onLoad={handleImageLoad}
@@ -399,7 +441,7 @@ export default function ImageWindow() {
                     {hasLiveVideo && isPlayingLive && (
                         <video
                             ref={videoRef}
-                            src={liveVideoPath || ''}
+                            src={currentLiveVideoPath || ''}
                             className={`live-video ${isVideoVisible ? 'visible' : ''}`}
                             autoPlay
                             // muted={false} // Default is unmuted, explicit false for clarity
@@ -408,6 +450,21 @@ export default function ImageWindow() {
                         />
                     )}
                 </div>
+
+                {imageList.length > 1 && (
+                    <>
+                        {canGoPrev && (
+                            <button className="nav-btn nav-prev" onClick={goPrev}>
+                                <ChevronLeft size={28} />
+                            </button>
+                        )}
+                        {canGoNext && (
+                            <button className="nav-btn nav-next" onClick={goNext}>
+                                <ChevronRight size={28} />
+                            </button>
+                        )}
+                    </>
+                )}
             </div>
         </div>
     )

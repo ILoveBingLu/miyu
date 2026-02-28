@@ -624,6 +624,8 @@
           border: 1px solid var(--border-color);
           cursor: default;
           line-height: 1.4;
+          display: flex;
+          align-items: center;
         }
 
         .quote-text {
@@ -641,6 +643,16 @@
           margin-right: 4px;
           font-weight: 500;
           opacity: 0.9;
+        }
+
+        .quote-image-thumb {
+          width: 36px;
+          height: 36px;
+          object-fit: cover;
+          border-radius: 4px;
+          cursor: pointer;
+          flex-shrink: 0;
+          margin-left: 8px;
         }
       }
 
@@ -1577,6 +1589,16 @@
 
 // 群聊发送者名称
 // 链接/分享消息卡片
+.card-badge {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  background: var(--bg-tertiary);
+  padding: 1px 6px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
 .link-message {
   width: 280px;
   background: var(--card-bg);
@@ -1650,6 +1672,143 @@
       svg {
         opacity: 0.5;
       }
+    }
+  }
+
+  &--cover {
+    width: 200px;
+  }
+
+  .link-cover {
+    height: 260px;
+    overflow: hidden;
+
+    img {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: cover;
+    }
+  }
+
+  .link-source {
+    padding: 6px 12px 8px;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+
+    .link-source-avatar {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+    }
+  }
+}
+
+// 小程序消息卡片
+.miniprogram-card {
+  width: 240px;
+  background: var(--card-bg);
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+
+  .miniprogram-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 12px 4px;
+
+    .miniprogram-icon {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      object-fit: cover;
+      flex-shrink: 0;
+    }
+
+    .miniprogram-icon-placeholder {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--bg-tertiary);
+      flex-shrink: 0;
+    }
+
+    .miniprogram-name {
+      font-size: 12px;
+      color: var(--text-tertiary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+
+  .miniprogram-title {
+    padding: 4px 12px 8px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+    line-height: 1.4;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .miniprogram-cover {
+    overflow: hidden;
+
+    .miniprogram-cover-img {
+      width: calc(100% - 24px);
+      margin: 0 12px 8px;
+      display: block;
+      object-fit: cover;
+      border-radius: 6px;
+    }
+
+    .miniprogram-cover-placeholder {
+      width: calc(100% - 24px);
+      height: 100px;
+      margin: 0 12px 8px;
+      border-radius: 6px;
+      background: var(--bg-tertiary);
+    }
+
+    .miniprogram-cover-icon {
+      width: calc(100% - 24px);
+      height: 100px;
+      margin: 0 12px 8px;
+      border-radius: 6px;
+      background: var(--bg-tertiary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      img {
+        width: 40px;
+        height: 40px;
+        border-radius: 8px;
+        object-fit: cover;
+      }
+    }
+  }
+
+  .miniprogram-footer {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
+    border-top: 1px solid var(--border-color);
+    font-size: 11px;
+    color: var(--text-tertiary);
+
+    .miniprogram-logo {
+      opacity: 0.6;
     }
   }
 }
@@ -1867,6 +2026,345 @@
     .transfer-label {
       font-size: 12px;
       opacity: 0.85;
+    }
+  }
+}
+
+// 红包卡片
+.hongbao-message {
+  width: 240px;
+  background: linear-gradient(135deg, #e25b4a 0%, #c94535 100%);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  cursor: default;
+
+  .hongbao-icon {
+    flex-shrink: 0;
+    svg {
+      filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
+    }
+  }
+
+  .hongbao-info {
+    flex: 1;
+    color: white;
+
+    .hongbao-greeting {
+      font-size: 15px;
+      font-weight: 500;
+      margin-bottom: 6px;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    }
+
+    .hongbao-label {
+      font-size: 12px;
+      opacity: 0.8;
+    }
+  }
+}
+
+.gift-message {
+  width: 240px;
+  background: linear-gradient(135deg, #f7a8b8 0%, #e88fa0 100%);
+  border-radius: 12px;
+  padding: 14px 16px;
+  cursor: default;
+
+  .gift-img {
+    width: 100%;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    object-fit: cover;
+  }
+
+  .gift-info {
+    color: white;
+
+    .gift-wish {
+      font-size: 15px;
+      font-weight: 500;
+      margin-bottom: 4px;
+    }
+
+    .gift-name {
+      font-size: 12px;
+      opacity: 0.9;
+      margin-bottom: 2px;
+    }
+
+    .gift-price {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .gift-label {
+      font-size: 12px;
+      opacity: 0.7;
+    }
+  }
+}
+
+.music-message {
+  width: 240px;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  display: flex;
+  overflow: hidden;
+  cursor: pointer;
+
+  &:hover {
+    opacity: 0.85;
+  }
+
+  .music-cover {
+    width: 80px;
+    align-self: stretch;
+    flex-shrink: 0;
+    background: var(--hover-bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+  }
+
+  .music-info {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    padding: 10px;
+
+    .music-title {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .music-artist {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .music-source {
+      font-size: 11px;
+      color: var(--text-tertiary);
+      margin-top: 2px;
+    }
+  }
+}
+
+.contact-card-message {
+  width: 240px;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: relative;
+
+  .contact-card-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    overflow: hidden;
+    flex-shrink: 0;
+    background: var(--bg-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-tertiary);
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+  }
+
+  .contact-card-info {
+    flex: 1;
+    min-width: 0;
+
+    .contact-card-name {
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .contact-card-detail {
+      font-size: 11px;
+      color: var(--text-tertiary);
+      margin-top: 2px;
+    }
+  }
+
+  .contact-card-badge {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-size: 10px;
+    color: var(--text-tertiary);
+    border-top: 1px solid var(--border-color);
+    padding: 4px 0;
+    border-radius: 0 0 12px 12px;
+  }
+
+  padding-bottom: 28px;
+}
+
+.location-message {
+  width: 240px;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: pointer;
+
+  .location-text {
+    padding: 12px;
+    display: flex;
+    gap: 8px;
+  }
+
+  .location-icon {
+    flex-shrink: 0;
+    color: #e25b4a;
+    margin-top: 2px;
+  }
+
+  .location-info {
+    flex: 1;
+    min-width: 0;
+
+    .location-name {
+      font-size: 14px;
+      font-weight: 500;
+      margin-bottom: 2px;
+    }
+
+    .location-label {
+      font-size: 11px;
+      color: var(--text-tertiary);
+      line-height: 1.4;
+    }
+  }
+
+  .location-map {
+    position: relative;
+    height: 100px;
+    overflow: hidden;
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+
+      [data-mode="dark"] & {
+        filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.9);
+      }
+    }
+
+    .location-pin {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -90%);
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+    }
+  }
+}
+
+// 视频号卡片
+.channel-video-card {
+  width: 200px;
+  background: var(--card-bg);
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  position: relative;
+
+  .channel-video-cover {
+    position: relative;
+    width: 100%;
+    height: 260px;
+    background: #000;
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .channel-video-cover-placeholder {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #666;
+    }
+
+    .channel-video-duration {
+      position: absolute;
+      bottom: 6px;
+      right: 6px;
+      background: rgba(0, 0, 0, 0.6);
+      color: white;
+      font-size: 11px;
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+  }
+
+  .channel-video-info {
+    padding: 8px 10px;
+
+    .channel-video-title {
+      font-size: 13px;
+      color: var(--text-primary);
+      line-height: 1.4;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      margin-bottom: 4px;
+    }
+
+    .channel-video-author {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      color: var(--text-secondary);
+
+      .channel-video-avatar {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+      }
     }
   }
 }

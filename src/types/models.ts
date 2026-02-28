@@ -55,6 +55,8 @@ export interface Message {
   quotedContent?: string
   quotedSender?: string
   quotedImageMd5?: string
+  quotedEmojiMd5?: string
+  quotedEmojiCdnUrl?: string
   // 视频相关
   videoMd5?: string
   videoDuration?: number  // 视频时长（秒）

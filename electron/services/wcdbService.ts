@@ -17,6 +17,7 @@ export class WcdbService {
   private wcdbGetSessions: any = null
   private wcdbGetLogs: any = null
   private wcdbGetSnsTimeline: any = null
+  private wcdbExecQuery: any = null
 
   /**
    * 获取 DLL 路径
@@ -126,6 +127,9 @@ export class WcdbService {
 
       // wcdb_status wcdb_get_sns_timeline(wcdb_handle handle, int32 limit, int32 offset, const char* username, const char* keyword, int32 start_time, int32 end_time, char** out_json)
       this.wcdbGetSnsTimeline = this.lib.func('int32 wcdb_get_sns_timeline(int64 handle, int32 limit, int32 offset, const char* username, const char* keyword, int32 startTime, int32 endTime, _Out_ void** outJson)')
+
+      // wcdb_status wcdb_exec_query(wcdb_handle handle, const char* db_kind, const char* db_path, const char* sql, char** out_json)
+      this.wcdbExecQuery = this.lib.func('int32 wcdb_exec_query(int64 handle, const char* kind, const char* path, const char* sql, _Out_ void** outJson)')
 
       // 初始化
       const initResult = this.wcdbInit()
@@ -332,6 +336,32 @@ export class WcdbService {
 
       const timeline = JSON.parse(jsonStr)
       return { success: true, timeline }
+    } catch (e: any) {
+      return { success: false, error: e.message }
+    }
+  }
+
+  /**
+   * 执行原始 SQL 查询
+   */
+  async execQuery(kind: string, path: string, sql: string): Promise<{ success: boolean; rows?: any[]; error?: string }> {
+    if (!this.initialized || this.handle === null) {
+      return { success: false, error: 'WCDB 未初始化' }
+    }
+
+    try {
+      const outJson = [null]
+      const result = this.wcdbExecQuery(this.handle, kind, path || '', sql, outJson)
+
+      if (result !== 0 || !outJson[0]) {
+        return { success: false, error: `执行查询失败 (错误码: ${result})` }
+      }
+
+      const jsonStr = this.koffi.decode(outJson[0], 'char', -1)
+      this.wcdbFreeString(outJson[0])
+
+      const rows = JSON.parse(jsonStr)
+      return { success: true, rows }
     } catch (e: any) {
       return { success: false, error: e.message }
     }

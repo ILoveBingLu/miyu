@@ -5,6 +5,7 @@ import { ConfigService } from './config'
 import { wechatDecryptService } from './decryptService'
 import { imageDecryptService } from './imageDecryptService'
 import { chatService } from './chatService'
+import { snsService } from './snsService'
 
 // 文件系统监听器类型
 type FileWatcher = fs.FSWatcher | null
@@ -380,6 +381,7 @@ class DataManagementService {
       }
 
       const filesToUpdate = scanResult.databases.filter(db => db.needsUpdate)
+
       if (filesToUpdate.length === 0) {
         return { success: true, successCount: 0, failCount: 0 }
       }
@@ -436,6 +438,10 @@ class DataManagementService {
 
         // 在备份/覆盖文件前，先关闭该数据库的连接，释放文件锁
         chatService.closeDatabase(file.fileName)
+        // sns.db 由 snsService 单独管理，也需要关闭
+        if (file.fileName.toLowerCase() === 'sns.db') {
+          snsService.closeSnsDb()
+        }
         // 等待文件句柄释放
         await new Promise(resolve => setTimeout(resolve, 100))
 
@@ -474,6 +480,8 @@ class DataManagementService {
 
           if (!backupSuccess) {
             // 重试失败，跳过这个文件
+            console.warn(`[增量同步] 备份失败，跳过文件: ${file.fileName}`)
+            failCount++
             continue
           }
         }
@@ -558,8 +566,16 @@ class DataManagementService {
 
         if (result.success) {
           successCount++
-          // const time = new Date().toLocaleTimeString()
-          // console.log(`[${time}] [增量同步] 同步成功: ${file.fileName}`) // 减少日志
+
+          // sns.db 特殊处理：合并旧数据，防止"三天可见"等设置导致朋友圈数据丢失
+          if (file.fileName.toLowerCase() === 'sns.db' && fs.existsSync(backupPath) && fs.existsSync(file.decryptedPath!)) {
+            try {
+              await this.mergeSnsTimeline(file.decryptedPath!, backupPath)
+            } catch (e) {
+              console.warn('[增量同步] sns.db 数据合并失败，不影响更新:', e)
+            }
+          }
+
           if (fs.existsSync(backupPath)) {
             try { fs.unlinkSync(backupPath) } catch { }
           }
@@ -594,6 +610,56 @@ class DataManagementService {
   }
 
 
+
+  /**
+   * 合并 sns.db 朋友圈数据，防止"三天可见"等设置导致旧数据丢失
+   * 将旧备份中存在但新数据库中不存在的 SnsTimeLine 记录合并回来
+   */
+  private async mergeSnsTimeline(newDbPath: string, oldBackupPath: string): Promise<void> {
+    const Database = require('better-sqlite3')
+    let newDb: any = null
+    let oldDb: any = null
+
+    try {
+      newDb = new Database(newDbPath)
+      oldDb = new Database(oldBackupPath, { readonly: true })
+
+      // 获取新旧数据库的 tid 集合
+      const newTids = new Set(
+        (newDb.prepare('SELECT tid FROM SnsTimeLine').all() as any[]).map((r: any) => String(r.tid))
+      )
+      const oldRows = oldDb.prepare('SELECT tid, user_name, content FROM SnsTimeLine').all() as any[]
+
+      // 找出旧数据库中有但新数据库中没有的记录
+      const missingRows = oldRows.filter((r: any) => !newTids.has(String(r.tid)))
+
+      if (missingRows.length === 0) {
+        return
+      }
+
+      console.log(`[增量同步] sns.db 合并: 发现 ${missingRows.length} 条旧朋友圈数据需要保留`)
+
+      // 批量插入缺失的记录
+      const insert = newDb.prepare(
+        'INSERT OR IGNORE INTO SnsTimeLine (tid, user_name, content) VALUES (?, ?, ?)'
+      )
+
+      const insertMany = newDb.transaction((rows: any[]) => {
+        for (const row of rows) {
+          insert.run(row.tid, row.user_name, row.content)
+        }
+      })
+
+      insertMany(missingRows)
+      console.log(`[增量同步] sns.db 合并完成: 已恢复 ${missingRows.length} 条朋友圈数据`)
+    } catch (e: any) {
+      // 如果表结构不匹配等问题，记录但不中断
+      console.warn('[增量同步] sns.db 合并异常:', e?.message || e)
+    } finally {
+      try { oldDb?.close() } catch {}
+      try { newDb?.close() } catch {}
+    }
+  }
 
   /**
    * 发送进度到前端（发送到所有窗口，确保主窗口能收到）

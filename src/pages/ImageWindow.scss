@@ -67,21 +67,11 @@
                     gap: 6px;
                     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 
-                    &::before,
-                    &::after {
+                    &::before {
+                        content: attr(data-tooltip);
                         position: absolute;
                         left: 50%;
                         transform: translateX(-50%);
-                        opacity: 0;
-                        visibility: hidden;
-                        pointer-events: none;
-                        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-                        z-index: 1000;
-                    }
-
-                    // Tooltip Bubble (Downward)
-                    &::before {
-                        content: attr(data-tooltip);
                         top: 100%;
                         margin-top: 8px;
                         background: rgba(20, 20, 20, 0.9);
@@ -94,34 +84,21 @@
                         font-weight: normal;
                         border: 1px solid rgba(255, 255, 255, 0.15);
                         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-                    }
-
-                    // Tooltip Arrow (Pointing Up)
-                    &::after {
-                        content: "";
-                        top: 100%;
-                        margin-top: 3px;
-                        width: 0;
-                        height: 0;
-                        border-width: 0 5px 5px 5px;
-                        border-style: solid;
-                        border-color: transparent transparent rgba(20, 20, 20, 0.9) transparent;
+                        opacity: 0;
+                        visibility: hidden;
+                        pointer-events: none;
+                        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+                        z-index: 1000;
                     }
 
                     &:hover {
                         background: rgba(var(--primary-rgb, 139, 115, 85), 0.2);
-                        transform: translateY(1px); // Subtle push down in title bar
+                        transform: translateY(1px);
 
                         &::before {
                             opacity: 1;
                             visibility: visible;
                             transform: translateX(-50%) translateY(4px);
-                        }
-
-                        &::after {
-                            opacity: 1;
-                            visibility: visible;
-                            transform: translateX(-50%) translateY(0);
                         }
                     }
 
@@ -156,6 +133,15 @@
                 height: 14px;
                 background: var(--border-color);
                 margin: 0 4px;
+            }
+
+            .image-counter {
+                font-size: 12px;
+                color: var(--text-secondary);
+                font-variant-numeric: tabular-nums;
+                white-space: nowrap;
+                min-width: 36px;
+                text-align: center;
             }
         }
     }
@@ -202,16 +188,52 @@
                 left: 0;
                 width: 100%;
                 height: 100%;
-                object-fit: fill; // Fill the wrapper (which is sized by img)
-                pointer-events: none; // Passthrough mouse events to wrapper/img for drag
+                object-fit: fill;
+                pointer-events: none;
                 opacity: 0;
-                transition: opacity 0.3s ease-in-out; // Smooth transition
+                transition: opacity 0.3s ease-in-out;
                 z-index: 2;
 
                 &.visible {
                     opacity: 1;
                 }
             }
+        }
+
+        .nav-btn {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 10;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: none;
+            background: rgba(0, 0, 0, 0.35);
+            backdrop-filter: blur(8px);
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.2s ease, background 0.2s ease;
+
+            &:hover {
+                background: rgba(0, 0, 0, 0.55);
+            }
+        }
+
+        .nav-prev {
+            left: 12px;
+        }
+
+        .nav-next {
+            right: 12px;
+        }
+
+        &:hover .nav-btn {
+            opacity: 1;
         }
     }
 }

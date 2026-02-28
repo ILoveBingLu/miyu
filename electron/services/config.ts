@@ -13,6 +13,10 @@ interface ConfigSchema {
   imageXorKey: string
   imageAesKey: string
 
+  // 表情包缓存解密相关（逆向 Wexin.dll 确认）
+  emoticonUin: string        // 微信 UIN（数字）
+  emoticonKeyString: string  // vfunc@32 返回的字符串
+
   // 缓存相关
   cachePath: string
   lastOpenedDb: string
@@ -71,6 +75,8 @@ const defaults: ConfigSchema = {
   myWxid: '',
   imageXorKey: '',
   imageAesKey: '',
+  emoticonUin: '',
+  emoticonKeyString: '',
   cachePath: '',
   lastOpenedDb: '',
   lastSession: '',

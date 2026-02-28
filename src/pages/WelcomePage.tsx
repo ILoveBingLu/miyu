@@ -663,11 +663,10 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
                 <h3>图片密钥说明</h3>
                 <p>用于解密微信图片的密钥（可选）。</p>
                 <ul className="info-list">
-                  <li>点击"自动获取"扫描内存</li>
-                  <li>现在是自动扫描中</li>
-                  <li>现在在微信聊天或朋友圈点击查看大图（朋友圈点开图片后，点击用窗口打开）</li>
-                  <li>重复此操作，直到获取到密钥</li>
-                  <li>如失败可重复以上步骤</li>
+                  <li>点击"自动获取"从本地缓存目录扫描</li>
+                  <li>无需启动微信，秒级获取</li>
+                  <li>自动匹配当前 wxid 的密钥</li>
+                  <li>如无法获取，可手动填写</li>
                 </ul>
               </div>
             )}

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { Loader2, RefreshCw, Search, Calendar, User, X, Filter, AlertTriangle, Play, Download, Heart, Copy, Link, Music, FileDown } from 'lucide-react'
 import { ImagePreview } from '../components/ImagePreview'
 import { LivePhotoIcon } from '../components/LivePhotoIcon'
-import { parseWechatEmoji } from '../utils/wechatEmoji'
+import { parseWechatEmoji, parseWechatEmojiHtml } from '../utils/wechatEmoji'
 import TitleBar from '../components/TitleBar'
 import JumpToDateDialog from '../components/JumpToDateDialog'
 import DateRangePicker from '../components/DateRangePicker'
@@ -86,8 +86,11 @@ const formatXml = (xml: string) => {
   }
 }
 
+// 缓存已解密的媒体路径，用于构建图片列表传给查看器
+const mediaPathCache = new Map<string, { imagePath: string; liveVideoPath?: string }>()
+
 // 媒体项组件
-const MediaItem = ({ media, onPreview, onMediaDeleted }: { media: any; onPreview: (src: string, isVideo?: boolean, liveVideoPath?: string) => void; onMediaDeleted?: () => void }) => {
+const MediaItem = ({ media, isSingle, allMedia, onPreview, onMediaDeleted }: { media: any; isSingle?: boolean; allMedia?: any[]; onPreview: (src: string, isVideo?: boolean, liveVideoPath?: string) => void; onMediaDeleted?: () => void }) => {
   const [error, setError] = useState(false)
   const [deleted, setDeleted] = useState(false)
   const [thumbSrc, setThumbSrc] = useState<string>('')
@@ -97,11 +100,41 @@ const MediaItem = ({ media, onPreview, onMediaDeleted }: { media: any; onPreview
   const [isVisible, setIsVisible] = useState(false)
   const imgRef = useRef<HTMLDivElement>(null)
 
-  const { url, thumb, livePhoto } = media
+  const { url, thumb, livePhoto, width: rawWidth, height: rawHeight } = media
   const isLive = !!livePhoto
   const targetUrl = thumb || url
 
   const isVideo = url && isVideoUrl(url)
+
+  // 骨架屏宽高比和具体尺寸（用于单图模式，防止 max-content width 退化为 0）
+  let skeletonStyle: React.CSSProperties | undefined = undefined
+  if (rawWidth && rawHeight && rawWidth > 0 && rawHeight > 0) {
+    if (isSingle) {
+      // 单图模式下，根据原始宽高和最大容器限制计算展示宽高
+      const MAX_W = 260
+      const MAX_H = 400
+      let w = rawWidth
+      let h = rawHeight
+      if (w > MAX_W) {
+        h = h * (MAX_W / w)
+        w = MAX_W
+      }
+      if (h > MAX_H) {
+        w = w * (MAX_H / h)
+        h = MAX_H
+      }
+      skeletonStyle = { width: w, height: h }
+    } else {
+      skeletonStyle = { aspectRatio: `${rawWidth} / ${rawHeight}` }
+    }
+  } else {
+    // 缺失宽高参数时的 fallback 骨架屏，确保一定有占位
+    if (isSingle) {
+      skeletonStyle = { width: 260, height: 260 }
+    } else {
+      skeletonStyle = { aspectRatio: '1 / 1' }
+    }
+  }
 
   // Intersection Observer 懒加载
   useEffect(() => {
@@ -224,21 +257,24 @@ const MediaItem = ({ media, onPreview, onMediaDeleted }: { media: any; onPreview
           if (cancelled) return
 
           if (result.success) {
+            let resolvedPath = ''
             if (result.localPath) {
               // 使用本地文件路径（file:// 协议）
-              const localUrl = result.localPath.startsWith('file:')
+              resolvedPath = result.localPath.startsWith('file:')
                 ? result.localPath
                 : `file://${result.localPath.replace(/\\/g, '/')}`
-              setThumbSrc(localUrl)
             } else if (result.dataUrl) {
               // 回退：使用 base64 dataUrl
-              setThumbSrc(result.dataUrl)
+              resolvedPath = result.dataUrl
             } else if (result.videoPath) {
               // 兼容：某些情况下可能返回 videoPath
-              const localUrl = result.videoPath.startsWith('file:')
+              resolvedPath = result.videoPath.startsWith('file:')
                 ? result.videoPath
                 : `file://${result.videoPath.replace(/\\/g, '/')}`
-              setThumbSrc(localUrl)
+            }
+            if (resolvedPath) {
+              setThumbSrc(resolvedPath)
+              mediaPathCache.set(targetUrl, { imagePath: resolvedPath })
             }
           } else {
             setDeleted(true)
@@ -252,16 +288,23 @@ const MediaItem = ({ media, onPreview, onMediaDeleted }: { media: any; onPreview
             }).then((res: any) => {
               if (cancelled) return
               if (res.success) {
+                let liveLocalUrl = ''
                 if (res.videoPath) {
-                  const localUrl = res.videoPath.startsWith('file:')
+                  liveLocalUrl = res.videoPath.startsWith('file:')
                     ? res.videoPath
                     : `file://${res.videoPath.replace(/\\/g, '/')}`
-                  setLiveVideoPath(localUrl)
                 } else if (res.localPath) {
-                  const localUrl = res.localPath.startsWith('file:')
+                  liveLocalUrl = res.localPath.startsWith('file:')
                     ? res.localPath
                     : `file://${res.localPath.replace(/\\/g, '/')}`
-                  setLiveVideoPath(localUrl)
+                }
+                if (liveLocalUrl) {
+                  setLiveVideoPath(liveLocalUrl)
+                  // 更新缓存中的 liveVideoPath
+                  const cached = mediaPathCache.get(targetUrl)
+                  if (cached) {
+                    cached.liveVideoPath = liveLocalUrl
+                  }
                 }
               }
             }).catch((e: any) => { })
@@ -313,10 +356,27 @@ const MediaItem = ({ media, onPreview, onMediaDeleted }: { media: any; onPreview
         // 图片：使用图片查看器窗口
         if (thumbSrc) {
           const localPath = thumbSrc.replace(/^file:\/\//, '')
-          // 如果是 Live Photo，传递视频路径（即使还没加载完也传递，让查看器知道这是 Live Photo）
           const liveVideoLocalPath = isLive && liveVideoPath ? liveVideoPath.replace(/^file:\/\//, '') : undefined
 
-          await window.electronAPI.window.openImageViewerWindow(localPath, liveVideoLocalPath)
+          // 从缓存构建同一条动态的图片列表
+          let imageList: Array<{ imagePath: string; liveVideoPath?: string }> | undefined
+          if (allMedia && allMedia.length > 1) {
+            const list: Array<{ imagePath: string; liveVideoPath?: string }> = []
+            for (const m of allMedia) {
+              if (m.url && isVideoUrl(m.url)) continue // 跳过视频
+              const key = m.thumb || m.url
+              const cached = mediaPathCache.get(key)
+              if (cached) {
+                list.push({
+                  imagePath: cached.imagePath.replace(/^file:\/\//, ''),
+                  liveVideoPath: cached.liveVideoPath?.replace(/^file:\/\//, '')
+                })
+              }
+            }
+            if (list.length > 1) imageList = list
+          }
+
+          await window.electronAPI.window.openImageViewerWindow(localPath, liveVideoLocalPath, imageList)
         }
       }
     } catch (error) {
@@ -328,7 +388,11 @@ const MediaItem = ({ media, onPreview, onMediaDeleted }: { media: any; onPreview
 
   if (deleted) {
     return (
-      <div ref={imgRef} className="media-item deleted-media">
+      <div
+        ref={imgRef}
+        className="media-item deleted-media"
+        style={skeletonStyle}
+      >
         <div className="deleted-placeholder">
           <AlertTriangle size={24} />
           <span>已删除</span>
@@ -341,17 +405,12 @@ const MediaItem = ({ media, onPreview, onMediaDeleted }: { media: any; onPreview
     <div
       ref={imgRef}
       className={`media-item ${error ? 'error' : ''} ${isVideo && isDecrypting ? 'decrypting' : ''}`}
+      style={!displaySrc && skeletonStyle ? skeletonStyle : undefined}
       onClick={handleClick}
     >
       {!isVisible ? (
-        <div className="media-placeholder">
-          <Loader2 size={20} className="spin" />
-        </div>
-      ) : isVideo && isDecrypting ? (
-        <div className="video-loading-overlay">
-          <RefreshCw size={24} className="spin-icon" />
-          <span>解密中...</span>
-        </div>
+        // 尚未进入视口：骨架屏占位（保持宽高比）
+        <div className="media-skeleton" />
       ) : displaySrc ? (
         <img
           src={displaySrc}
@@ -366,9 +425,8 @@ const MediaItem = ({ media, onPreview, onMediaDeleted }: { media: any; onPreview
           <span>加载失败</span>
         </div>
       ) : (
-        <div className="media-placeholder loading-state">
-          <Loader2 size={24} className="spin" />
-        </div>
+        // 可见但仍在加载中/解密中：shimmer 骨架屏
+        <div className="media-skeleton" />
       )}
 
       {isVisible && isVideo && !isDecrypting && (
@@ -469,6 +527,77 @@ const ShareThumb = ({ shareInfo }: { shareInfo: SnsShareInfo }) => {
   )
 }
 
+// 表情包内存缓存：url/encryptUrl → file:// 本地路径
+const emojiCache = new Map<string, string>()
+
+// 评论表情包组件（先查内存缓存，再查本地文件，最后才下载）
+const CommentEmoji = ({ emoji, onPreview }: {
+  emoji: { url: string; md5: string; width: number; height: number; encryptUrl?: string; aesKey?: string }
+  onPreview?: (src: string) => void
+}) => {
+  const cacheKey = emoji.encryptUrl || emoji.url
+  const [localSrc, setLocalSrc] = useState<string>(() => emojiCache.get(cacheKey) || '')
+
+  useEffect(() => {
+    if (!cacheKey) return
+    if (emojiCache.has(cacheKey)) {
+      setLocalSrc(emojiCache.get(cacheKey)!)
+      return
+    }
+    let cancelled = false
+
+    const load = async () => {
+      try {
+        const res = await window.electronAPI.sns.downloadEmoji({
+          url: emoji.url,
+          encryptUrl: emoji.encryptUrl,
+          aesKey: emoji.aesKey
+        })
+        if (cancelled) return
+        if (res.success && res.localPath) {
+          const fileUrl = res.localPath.startsWith('file:')
+            ? res.localPath
+            : `file://${res.localPath.replace(/\\/g, '/')}`
+          emojiCache.set(cacheKey, fileUrl)
+          setLocalSrc(fileUrl)
+        }
+      } catch (e) {
+        // 静默失败
+      }
+    }
+
+    load()
+    return () => { cancelled = true }
+  }, [cacheKey])
+
+  if (!localSrc) return null
+
+  return (
+    <img
+      src={localSrc}
+      alt="emoji"
+      className="comment-custom-emoji"
+      draggable={false}
+      onClick={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        onPreview?.(localSrc)
+      }}
+      style={{
+        width: Math.min(emoji.width || 36, 30),
+        height: Math.min(emoji.height || 36, 30),
+        verticalAlign: 'middle',
+        marginLeft: 2,
+        borderRadius: 6,
+        cursor: 'pointer',
+        pointerEvents: 'auto',
+        position: 'relative',
+        zIndex: 5
+      }}
+    />
+  )
+}
+
 // 朋友圈长文折叠展开组件
 const ExpandableText = ({ content }: { content: string }) => {
   const [isExpanded, setIsExpanded] = useState(false)
@@ -522,11 +651,15 @@ function MomentsWindow() {
 
   // 筛选状态
   const [searchKeyword, setSearchKeyword] = useState('')
-  const [selectedUsernames, setSelectedUsernames] = useState<string[]>([])
+  const [selectedUsernames, setSelectedUsernames] = useState<string[]>(() => {
+    const p = new URLSearchParams(window.location.search)
+    const u = p.get('filterUsername')
+    return u ? [u] : []
+  })
   const [jumpTargetDate, setJumpTargetDate] = useState<Date | undefined>(undefined)
   const [contacts, setContacts] = useState<Contact[]>([])
   const [contactSearch, setContactSearch] = useState('')
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => !new URLSearchParams(window.location.search).get('filterUsername'))
   const [showJumpDialog, setShowJumpDialog] = useState(false)
 
   // 其他状态
@@ -548,6 +681,14 @@ function MomentsWindow() {
   const loadingRef = useRef(false)
   const sentinelRef = useRef<HTMLDivElement>(null)
   const isInitialLoad = useRef(true)
+
+  // 监听已有窗口收到的筛选消息
+  useEffect(() => {
+    const cleanup = window.electronAPI?.window?.onMomentsFilterUser?.((username: string) => {
+      setSelectedUsernames([username])
+    })
+    return () => cleanup?.()
+  }, [])
 
   // 处理滚动，当有新筛选项时回滚到顶部
   useEffect(() => {
@@ -746,13 +887,18 @@ function MomentsWindow() {
     if (exporting) return
 
     try {
-      // 弹出保存对话框
-      const result = await window.electronAPI.dialog.saveFile({
-        title: '导出朋友圈',
-        defaultPath: `朋友圈导出_${new Date().toISOString().slice(0, 10)}.html`,
-        filters: [{ name: 'HTML', extensions: ['html'] }]
+      // 弹出选择目录对话框
+      const result = await window.electronAPI.dialog.openFile({
+        title: '选择导出目录',
+        properties: ['openDirectory']
       })
-      if (!result || result.canceled || !result.filePath) return
+      if (!result || result.canceled || !result.filePaths || result.filePaths.length === 0) return
+
+      // 在选择的目录下创建带时间戳的子文件夹
+      const now = new Date()
+      const ts = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`
+      const exportDirName = `朋友圈_${ts}`
+      const exportDir = `${result.filePaths[0].replace(/\\/g, '/')}/${exportDirName}`
 
       setExporting(true)
       setExportProgress({ current: 0, total: 0, status: '正在获取动态数据...' })
@@ -793,29 +939,55 @@ function MomentsWindow() {
       // 第二阶段：如果需要图片/视频，批量下载到同级 media 目录
       const imageCache = new Map<string, string>() // url -> 相对路径 (media/xxx.jpg)
       const avatarMap = new Map<string, string>() // username -> 相对路径 (media/avatar_xxx.jpg)
+      const emojiCache = new Map<string, string>() // url/encryptUrl -> 相对路径
 
-      const htmlDir = result.filePath.replace(/\\/g, '/').replace(/\/[^/]+$/, '')
+      const htmlDir = exportDir
       const mediaDir = `${htmlDir}/media`
 
       if (exportOptions.includeImages) {
-        // 收集所有媒体和头像
-        const allMediaUrls: { url: string; key?: string; type: 'media' | 'avatar'; username?: string }[] = []
+        // 收集所有媒体、头像和表情包
+        const allMediaUrls: { url: string; key?: string; type: 'media' | 'avatar' | 'emoji'; username?: string; md5?: string; encryptUrl?: string; aesKey?: string }[] = []
 
-        // 1. 媒体
+        // 1. 媒体（使用 md5 或 URL 作为唯一标识去重）
+        const mediaUrlSet = new Set<string>()
         for (const p of allPosts) {
           if (p.media) {
             for (const m of p.media) {
               const thumbUrl = m.thumb || m.url
-              if (thumbUrl) {
-                allMediaUrls.push({ url: thumbUrl, key: m.key, type: 'media' })
+              if (thumbUrl && !mediaUrlSet.has(thumbUrl)) {
+                mediaUrlSet.add(thumbUrl)
+                allMediaUrls.push({ url: thumbUrl, key: m.key, type: 'media', md5: m.md5 })
               }
               // 普通视频
-              if (m.url && isVideoUrl(m.url) && m.url !== thumbUrl) {
-                allMediaUrls.push({ url: m.url, key: m.key, type: 'media' })
+              if (m.url && isVideoUrl(m.url) && m.url !== thumbUrl && !mediaUrlSet.has(m.url)) {
+                mediaUrlSet.add(m.url)
+                allMediaUrls.push({ url: m.url, key: m.key, type: 'media', md5: m.md5 })
               }
               // 实况照片视频
-              if (m.livePhoto && m.livePhoto.url) {
+              if (m.livePhoto && m.livePhoto.url && !mediaUrlSet.has(m.livePhoto.url)) {
+                mediaUrlSet.add(m.livePhoto.url)
                 allMediaUrls.push({ url: m.livePhoto.url, key: m.livePhoto.key || m.key, type: 'media' })
+              }
+            }
+          }
+
+          // 收集评论中的表情包
+          if (p.comments) {
+            for (const c of p.comments) {
+              if (c.emojis) {
+                for (const emoji of c.emojis) {
+                  const emojiId = emoji.md5 || emoji.encryptUrl || emoji.url
+                  if (emojiId && !mediaUrlSet.has(emojiId)) {
+                    mediaUrlSet.add(emojiId)
+                    allMediaUrls.push({
+                      type: 'emoji',
+                      url: emoji.url,
+                      encryptUrl: emoji.encryptUrl,
+                      aesKey: emoji.aesKey,
+                      md5: emoji.md5
+                    })
+                  }
+                }
               }
             }
           }
@@ -844,13 +1016,24 @@ function MomentsWindow() {
                       url: item.url,
                       key: item.key,
                       outputDir: htmlDir,
-                      index: globalIdx
+                      index: globalIdx,
+                      md5: item.md5,
+                      isAvatar: item.type === 'avatar',
+                      username: item.username,
+                      isEmoji: item.type === 'emoji',
+                      encryptUrl: item.encryptUrl,
+                      aesKey: item.aesKey
                     })
                     if (res.success && res.fileName) {
                       if (item.type === 'media') {
                         imageCache.set(item.url, `media/${res.fileName}`)
-                      } else if (item.username) {
+                      } else if (item.type === 'avatar' && item.username) {
                         avatarMap.set(item.username, `media/${res.fileName}`)
+                      } else if (item.type === 'emoji') {
+                        const cacheKey = item.encryptUrl || item.url
+                        if (cacheKey) {
+                          emojiCache.set(cacheKey, `media/${res.fileName}`)
+                        }
                       }
                     }
                   } catch (e) {
@@ -937,17 +1120,29 @@ function MomentsWindow() {
 
         let commentsHtml = ''
         if (p.comments && p.comments.length > 0) {
-          const items = p.comments.map((c: any) => {
+          const items = await Promise.all(p.comments.map(async (c: any) => {
             const reply = c.refNickname ? `<span class="re">回复</span><b>${escHtml(c.refNickname)}</b>` : ''
-            return `<div class="cmt"><b>${escHtml(c.nickname)}</b>${reply}：${escHtml(c.content)}</div>`
-          }).join('')
-          commentsHtml = `<div class="interactions${p.likes.length > 0 ? ' cmt-border' : ''}"><div class="cmts">${items}</div></div>`
+            let emojiHtml = ''
+            if (c.emojis && c.emojis.length > 0) {
+              emojiHtml = c.emojis.map((emoji: any) => {
+                const cacheKey = emoji.encryptUrl || emoji.url
+                const fileUrl = imageCache.get(cacheKey) || emojiCache.get(cacheKey) || '' // 对于导出的表情包，我们可能需要使用对应的路径，由于表情包独立下载可能没存到导出的媒体库，先保留内存路径
+                if (!fileUrl) return ''
+                return `<img src="${escHtml(fileUrl)}" style="width: ${Math.min(emoji.width || 36, 48)}px; height: ${Math.min(emoji.height || 36, 48)}px; vertical-align: middle; margin-left: 2px; border-radius: 6px; cursor: pointer; pointer-events: auto;" onclick="openLightbox('${escHtml(fileUrl)}')" />`
+              }).join('')
+            }
+            const cContentHtml = await parseWechatEmojiHtml(c.content)
+            return `<div class="cmt"><b>${escHtml(c.nickname)}</b>${reply}：${cContentHtml}${emojiHtml}</div>`
+          }))
+          commentsHtml = `<div class="interactions${p.likes.length > 0 ? ' cmt-border' : ''}"><div class="cmts">${items.join('')}</div></div>`
         }
 
         const avatarFile = p.username ? avatarMap.get(p.username) : null
         const avatarHtml = avatarFile
           ? `<div class="avatar"><img src="${avatarFile}" alt=""></div>`
           : `<div class="avatar">${escHtml(p.nickname[0] || '?')}</div>`
+
+        const pContentHtml = await parseWechatEmojiHtml(p.contentDesc)
 
         postsHtml += `
         <div class="post">
@@ -957,7 +1152,7 @@ function MomentsWindow() {
               <span class="nick">${escHtml(p.nickname)}</span>
               <span class="tm">${formatDate(p.createTime)}</span>
             </div>
-            ${p.contentDesc ? `<div class="txt">${escHtml(p.contentDesc)}</div>` : ''}
+            ${p.contentDesc ? `<div class="txt">${pContentHtml}</div>` : ''}
             ${mediaHtml}
             ${shareHtml}
             ${likesHtml}
@@ -1153,15 +1348,15 @@ document.querySelectorAll('.vi video').forEach(function(v) {
 </body>
 </html>`
 
-      // 通过 IPC 直接写入用户选择的路径
+      // 写入 index.html 到导出目录
+      const htmlFilePath = `${exportDir}/index.html`
       setExportProgress({ current: allPosts.length, total: allPosts.length, status: '正在写入文件...' })
-      const writeResult = await window.electronAPI.sns.writeExportFile(result.filePath, fullHtml)
+      const writeResult = await window.electronAPI.sns.writeExportFile(htmlFilePath, fullHtml)
 
       if (writeResult.success) {
         setExportProgress({ current: allPosts.length, total: allPosts.length, status: '导出完成！' })
-        // 导出完成后打开文件所在目录
-        const dir = result.filePath.replace(/\\/g, '/').replace(/\/[^/]+$/, '')
-        window.electronAPI.shell.openPath(dir)
+        // 导出完成后打开导出目录
+        window.electronAPI.shell.openPath(exportDir)
       } else {
         setExportProgress({ current: 0, total: 0, status: `写入失败: ${writeResult.error}` })
       }
@@ -1192,14 +1387,19 @@ document.querySelectorAll('.vi video').forEach(function(v) {
         title="朋友圈"
         rightContent={
           <div className="title-actions">
+            <button className="export-btn" onClick={() => setShowExportOptions(true)}>
+              <FileDown size={14} />
+              <span>导出</span>
+            </button>
+            <div className="divider"></div>
             <button
               className={`icon-btn ${isSidebarOpen ? 'active' : ''}`}
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              title={isSidebarOpen ? "收起筛选" : "打开筛选"}
+              data-tooltip={isSidebarOpen ? "收起筛选" : "打开筛选"}
             >
               <Filter size={16} />
             </button>
-            <button onClick={() => loadPosts({ reset: true })} disabled={isLoading} className="refresh-btn" title="刷新">
+            <button onClick={() => loadPosts({ reset: true })} disabled={isLoading} className="refresh-btn" data-tooltip="刷新">
               <RefreshCw size={16} className={isLoading ? 'spinning' : ''} />
             </button>
           </div>
@@ -1303,21 +1503,12 @@ document.querySelectorAll('.vi video').forEach(function(v) {
               <RefreshCw size={14} />
               重置所有筛选
             </button>
-            <button className="export-btn" onClick={() => setShowExportOptions(true)}>
-              <FileDown size={14} />
-              导出朋友圈
-            </button>
           </div>
         </aside>
 
         {/* 主内容区 */}
         <div className="moments-main">
           <div className="moments-content-wrapper">
-            <div className="sns-notice-banner">
-              <AlertTriangle size={16} />
-              <span>由于技术限制，当前无法解密显示部分图片与视频等加密资源文件</span>
-            </div>
-
             <div className="moments-content custom-scrollbar">
               {isLoading ? (
                 <div className="moments-loading">
@@ -1388,6 +1579,8 @@ document.querySelectorAll('.vi video').forEach(function(v) {
                             <MediaItem
                               key={idx}
                               media={m}
+                              isSingle={post.media.length === 1}
+                              allMedia={post.media}
                               onPreview={(src, isVideo, liveVideoPath) => setPreviewImage({ src, isVideo, liveVideoPath })}
                               onMediaDeleted={[1, 54].includes(post.type ?? 0) ? () => setDeletedPostIds(prev => new Set(prev).add(post.id)) : undefined}
                             />
@@ -1461,7 +1654,12 @@ document.querySelectorAll('.vi video').forEach(function(v) {
                                     </>
                                   )}
                                   <span className="comment-separator">: </span>
-                                  <span className="comment-content">{parseWechatEmoji(comment.content)}</span>
+                                  <span className="comment-content">
+                                    {comment.content && parseWechatEmoji(comment.content)}
+                                    {comment.emojis && comment.emojis.map((emoji: any, eidx: number) => (
+                                      <CommentEmoji key={eidx} emoji={emoji} onPreview={(src) => setPreviewImage({ src })} />
+                                    ))}
+                                  </span>
                                 </div>
                               ))}
                             </div>

@@ -4,6 +4,7 @@ import { existsSync, mkdirSync } from 'fs'
 import { readFile, writeFile } from 'fs/promises'
 import { join, dirname } from 'path'
 import crypto from 'crypto'
+import zlib from 'zlib'
 import { chatService } from './chatService'
 import Database from 'better-sqlite3'
 import { app } from 'electron'
@@ -28,6 +29,8 @@ export interface SnsMedia {
     thumbKey?: string  // 缩略图的解密密钥（可能和原图不同）
     encIdx?: string
     livePhoto?: SnsLivePhoto
+    width?: number   // 媒体原始宽度（从 XML <size> 提取）
+    height?: number  // 媒体原始高度（从 XML <size> 提取）
 }
 
 export interface SnsShareInfo {
@@ -52,7 +55,7 @@ export interface SnsPost {
     media: SnsMedia[]
     shareInfo?: SnsShareInfo
     likes: string[]
-    comments: { id: string; nickname: string; content: string; refCommentId: string; refNickname?: string }[]
+    comments: { id: string; nickname: string; content: string; refCommentId: string; refNickname?: string; emojis?: { url: string; md5: string; width: number; height: number; encryptUrl?: string; aesKey?: string }[] }[]
     rawXml?: string
 }
 
@@ -380,27 +383,28 @@ class SnsService {
             // 打开解密后的数据库（不需要密钥）
             this.snsDb = new Database(snsDbPath, { readonly: true })
 
-            // 测试连接并查看表结构
-            const testResult = this.snsDb.prepare('SELECT COUNT(*) as count FROM SnsTimeLine').get() as { count: number }
-            console.log(`[SnsService] 数据库打开成功，SnsTimeLine 表共有 ${testResult.count} 条记录`)
-
-            // 查看所有表
-            const tables = this.snsDb.prepare("SELECT name FROM sqlite_master WHERE type='table'").all()
-            console.log('[SnsService] 数据库中的所有表:', tables.map((t: any) => t.name).join(', '))
-
-            // 查看表结构
-            const tableInfo = this.snsDb.prepare('PRAGMA table_info(SnsTimeLine)').all()
-            console.log('[SnsService] SnsTimeLine 表结构:', tableInfo)
-
-            // 查看一些样本数据的字段
-            const sampleRows = this.snsDb.prepare('SELECT tid, user_name, LENGTH(content) as content_len FROM SnsTimeLine LIMIT 5').all()
-            console.log('[SnsService] 样本数据:', sampleRows)
+            // 测试连接
+            this.snsDb.prepare('SELECT COUNT(*) as count FROM SnsTimeLine').get()
 
             return true
         } catch (error) {
             console.error('[SnsService] 打开 SNS 数据库失败:', error)
             this.snsDb = null
             return false
+        }
+    }
+
+    /**
+     * 关闭 SNS 数据库连接，释放文件锁
+     */
+    closeSnsDb(): void {
+        if (this.snsDb) {
+            try {
+                this.snsDb.close()
+            } catch (e) {
+                // 忽略关闭错误
+            }
+            this.snsDb = null
         }
     }
 
@@ -425,12 +429,17 @@ class SnsService {
                 likeListMatch = xml.match(/<likeList>([\s\S]*?)<\/likeList>/i)
             }
 
+            // 方式4: 尝试查找 <like_user_list>（下划线格式，来自 LocalExtraInfo）
+            if (!likeListMatch) {
+                likeListMatch = xml.match(/<like_user_list>([\s\S]*?)<\/like_user_list>/i)
+            }
+
             if (!likeListMatch) return likes
 
             const likeListXml = likeListMatch[1]
 
-            // 提取所有 <LikeUser> 或 <likeUser> 标签
-            const likeUserRegex = /<(?:LikeUser|likeUser)>([\s\S]*?)<\/(?:LikeUser|likeUser)>/gi
+            // 提取所有 <LikeUser> 或 <likeUser> 或 <user_comment> 标签
+            const likeUserRegex = /<(?:LikeUser|likeUser|user_comment)>([\s\S]*?)<\/(?:LikeUser|likeUser|user_comment)>/gi
             let likeUserMatch
 
             while ((likeUserMatch = likeUserRegex.exec(likeListXml)) !== null) {
@@ -456,10 +465,11 @@ class SnsService {
     /**
      * 从 XML 中解析评论信息
      */
-    private parseCommentsFromXml(xml: string): { id: string; nickname: string; content: string; refCommentId: string; refNickname?: string }[] {
+    private parseCommentsFromXml(xml: string): { id: string; nickname: string; content: string; refCommentId: string; refNickname?: string; emojis?: { url: string; md5: string; width: number; height: number }[] }[] {
         if (!xml) return []
 
-        const comments: { id: string; nickname: string; content: string; refCommentId: string; refNickname?: string }[] = []
+        type CommentItem = { id: string; nickname: string; username?: string; content: string; refCommentId: string; refUsername?: string; refNickname?: string; emojis?: { url: string; md5: string; width: number; height: number }[] }
+        const comments: CommentItem[] = []
         try {
             // 方式1: 查找 <CommentUserList> 标签
             let commentListMatch = xml.match(/<CommentUserList>([\s\S]*?)<\/CommentUserList>/i)
@@ -474,43 +484,106 @@ class SnsService {
                 commentListMatch = xml.match(/<commentList>([\s\S]*?)<\/commentList>/i)
             }
 
+            // 方式4: 尝试查找 <comment_user_list>（下划线格式，来自 LocalExtraInfo）
+            if (!commentListMatch) {
+                commentListMatch = xml.match(/<comment_user_list>([\s\S]*?)<\/comment_user_list>/i)
+            }
+
             if (!commentListMatch) return comments
 
             const commentListXml = commentListMatch[1]
 
-            // 提取所有 <CommentUser> 或 <commentUser> 或 <comment> 标签
-            const commentUserRegex = /<(?:CommentUser|commentUser|comment)>([\s\S]*?)<\/(?:CommentUser|commentUser|comment)>/gi
+            // 提取所有评论标签（支持多种格式）
+            const commentUserRegex = /<(?:CommentUser|commentUser|comment|user_comment)>([\s\S]*?)<\/(?:CommentUser|commentUser|comment|user_comment)>/gi
             let commentUserMatch
 
             while ((commentUserMatch = commentUserRegex.exec(commentListXml)) !== null) {
                 const commentUserXml = commentUserMatch[1]
 
-                // 提取评论 ID（可能是 cmtid, commentId, id）
-                let idMatch = commentUserXml.match(/<(?:cmtid|commentId|id)>([^<]*)<\/(?:cmtid|commentId|id)>/i)
+                // 提取评论 ID（支持 cmtid, commentId, id, comment_id）
+                const idMatch = commentUserXml.match(/<(?:cmtid|commentId|comment_id|id)>([^<]*)<\/(?:cmtid|commentId|comment_id|id)>/i)
 
-                // 提取昵称（可能是 nickname 或 nickName）
+                // 提取用户名/wxid（用于回复关系解析）
+                const usernameMatch = commentUserXml.match(/<username>([^<]*)<\/username>/i)
+
+                // 提取昵称
                 let nicknameMatch = commentUserXml.match(/<nickname>([^<]*)<\/nickname>/i)
                 if (!nicknameMatch) {
                     nicknameMatch = commentUserXml.match(/<nickName>([^<]*)<\/nickName>/i)
                 }
 
-                // 提取评论内容
+                // 提取评论内容（content 可能为空，比如纯表情包评论）
                 const contentMatch = commentUserXml.match(/<content>([^<]*)<\/content>/i)
 
-                // 提取回复的评论 ID（如果是回复）
-                const refCommentIdMatch = commentUserXml.match(/<(?:refCommentId|replyCommentId)>([^<]*)<\/(?:refCommentId|replyCommentId)>/i)
+                // 提取回复的评论 ID（支持下划线格式 ref_comment_id）
+                const refCommentIdMatch = commentUserXml.match(/<(?:refCommentId|replyCommentId|ref_comment_id)>([^<]*)<\/(?:refCommentId|replyCommentId|ref_comment_id)>/i)
 
                 // 提取被回复者昵称
-                let refNicknameMatch = commentUserXml.match(/<(?:refNickname|refNickName|replyNickname)>([^<]*)<\/(?:refNickname|refNickName|replyNickname)>/i)
+                const refNicknameMatch = commentUserXml.match(/<(?:refNickname|refNickName|replyNickname)>([^<]*)<\/(?:refNickname|refNickName|replyNickname)>/i)
 
-                if (nicknameMatch && contentMatch) {
+                // 提取被回复者用户名（下划线格式 ref_username）
+                const refUsernameMatch = commentUserXml.match(/<ref_username>([^<]*)<\/ref_username>/i)
+
+                // 提取表情包信息
+                const emojis: { url: string; md5: string; width: number; height: number; encryptUrl?: string; aesKey?: string }[] = []
+                const emojiRegex = /<emojiinfo>([\s\S]*?)<\/emojiinfo>/gi
+                let emojiMatch
+                while ((emojiMatch = emojiRegex.exec(commentUserXml)) !== null) {
+                    const emojiXml = emojiMatch[1]
+                    // 优先 extern_url（公开可访问），其次 cdn_url，最后 url
+                    const externUrlMatch = emojiXml.match(/<extern_url>([^<]*)<\/extern_url>/i)
+                    const cdnUrlMatch = emojiXml.match(/<cdn_url>([^<]*)<\/cdn_url>/i)
+                    const plainUrlMatch = emojiXml.match(/<url>([^<]*)<\/url>/i)
+                    const emojiUrlMatch = externUrlMatch || cdnUrlMatch || plainUrlMatch
+                    const emojiMd5Match = emojiXml.match(/<md5>([^<]*)<\/md5>/i)
+                    const emojiWidthMatch = emojiXml.match(/<width>([^<]*)<\/width>/i)
+                    const emojiHeightMatch = emojiXml.match(/<height>([^<]*)<\/height>/i)
+                    // 加密 URL 和 AES 密钥（用于解密回退）
+                    const encryptUrlMatch = emojiXml.match(/<encrypt_url>([^<]*)<\/encrypt_url>/i)
+                    const aesKeyMatch = emojiXml.match(/<aes_key>([^<]*)<\/aes_key>/i)
+
+                    const url = emojiUrlMatch ? emojiUrlMatch[1].trim().replace(/&amp;/g, '&') : ''
+                    const encryptUrl = encryptUrlMatch ? encryptUrlMatch[1].trim().replace(/&amp;/g, '&') : undefined
+                    const aesKey = aesKeyMatch ? aesKeyMatch[1].trim() : undefined
+
+                    if (url || encryptUrl) {
+                        emojis.push({
+                            url,
+                            md5: emojiMd5Match ? emojiMd5Match[1].trim() : '',
+                            width: emojiWidthMatch ? parseInt(emojiWidthMatch[1]) : 0,
+                            height: emojiHeightMatch ? parseInt(emojiHeightMatch[1]) : 0,
+                            encryptUrl,
+                            aesKey
+                        })
+                    }
+                }
+
+                // 昵称存在即可（content 可能为空但有表情包）
+                if (nicknameMatch && (contentMatch || emojis.length > 0)) {
+                    const refCommentId = refCommentIdMatch ? refCommentIdMatch[1].trim() : ''
                     comments.push({
                         id: idMatch ? idMatch[1].trim() : `comment_${Date.now()}_${Math.random()}`,
                         nickname: nicknameMatch[1].trim(),
-                        content: contentMatch[1].trim(),
-                        refCommentId: refCommentIdMatch ? refCommentIdMatch[1].trim() : '',
-                        refNickname: refNicknameMatch ? refNicknameMatch[1].trim() : undefined
+                        username: usernameMatch ? usernameMatch[1].trim() : undefined,
+                        content: contentMatch ? contentMatch[1].trim() : '',
+                        refCommentId: (refCommentId === '0') ? '' : refCommentId,
+                        refUsername: refUsernameMatch ? refUsernameMatch[1].trim() : undefined,
+                        refNickname: refNicknameMatch ? refNicknameMatch[1].trim() : undefined,
+                        emojis: emojis.length > 0 ? emojis : undefined
                     })
+                }
+            }
+
+            // 第二遍：通过 refUsername 解析被回复者昵称（如果 refNickname 为空）
+            const usernameToNickname = new Map<string, string>()
+            for (const c of comments) {
+                if (c.username && c.nickname) {
+                    usernameToNickname.set(c.username, c.nickname)
+                }
+            }
+            for (const c of comments) {
+                if (!c.refNickname && c.refUsername && c.refCommentId) {
+                    c.refNickname = usernameToNickname.get(c.refUsername)
                 }
             }
         } catch (error) {
@@ -586,6 +659,26 @@ class SnsService {
                     if (encIdxMatch) thumbEncIdx = encIdxMatch[1]
                 }
 
+                // 提取宽高（<size width="288" height="512" .../>）
+                const sizeMatch = mediaXml.match(/<size\s+[^>]*width="(\d+)"[^>]*height="(\d+)"/i)
+                    || mediaXml.match(/<size\s+[^>]*height="(\d+)"[^>]*width="(\d+)"/i)
+                let mediaWidth: number | undefined
+                let mediaHeight: number | undefined
+                if (sizeMatch) {
+                    const w = parseInt(sizeMatch[1])
+                    const h = parseInt(sizeMatch[2])
+                    // width/height 顺序可能被 height-first 正则颠倒，做修正
+                    const sizeWMatch = mediaXml.match(/width="(\d+)"/i)
+                    const sizeHMatch = mediaXml.match(/height="(\d+)"/i)
+                    if (sizeWMatch && sizeHMatch) {
+                        mediaWidth = parseInt(sizeWMatch[1]) || undefined
+                        mediaHeight = parseInt(sizeHMatch[1]) || undefined
+                    } else {
+                        mediaWidth = w || undefined
+                        mediaHeight = h || undefined
+                    }
+                }
+
                 const mediaItem: SnsMedia = {
                     url: urlMatch ? urlMatch[1].trim() : '',
                     thumb: thumbMatch ? thumbMatch[1].trim() : '',
@@ -593,7 +686,9 @@ class SnsService {
                     key: urlKey || thumbKey,  // 原图的 key
                     thumbKey: thumbKey,  // 缩略图的 key（可能和原图不同）
                     md5: urlMd5,
-                    encIdx: urlEncIdx || thumbEncIdx
+                    encIdx: urlEncIdx || thumbEncIdx,
+                    width: mediaWidth,
+                    height: mediaHeight
                 }
 
                 // 检查是否有实况照片 <livePhoto>
@@ -655,6 +750,466 @@ class SnsService {
         return { media, videoKey }
     }
 
+    /**
+     * 获取表情包缓存目录（与聊天共用同一目录）
+     */
+    private getEmojiCacheDir(): string {
+        const cachePath = this.configService.getCacheBasePath()
+        const emojiDir = join(cachePath, 'Emojis')
+        if (!existsSync(emojiDir)) {
+            mkdirSync(emojiDir, { recursive: true })
+        }
+        return emojiDir
+    }
+
+    /**
+     * 解密表情数据（从 Weixin.dll 逆向得到的算法）
+     *
+     * 核心发现（sub_1845E6DB0 / c2c_response.cc）：
+     *   nonce = key 的前 12 字节，数据格式 = [ciphertext][auth_tag (16B)]
+     * 备选格式：GcmData 块、尾部 nonce、前置 nonce 等
+     * 解密后可能需要 zlib 解压（AesGcmDecryptWithUncompress）
+     */
+    private decryptEmojiAes(
+        encData: Buffer,
+        aesKey: string,
+        debug?: { cacheKey: string; source: 'encrypt_url' | 'plain_url' }
+    ): Buffer | null {
+        if (encData.length <= 16) {
+            return null
+        }
+
+        const keyTries = this.buildKeyTries(aesKey)
+        const tag = encData.subarray(encData.length - 16)
+        const ciphertext = encData.subarray(0, encData.length - 16)
+
+        // ★ 最高优先级：IDA 确认的 nonce-tail 格式 [ciphertext][nonce 12B][tag 16B]
+        // 来源：Weixin.dll sub_182687C70 (mmcrypto::AesGcmDecrypt)
+        // AAD 为空（sub_180C800F0 mode=13 传 0,0），支持 AES-128/256
+        if (encData.length > 28) {
+            const nonceTail = encData.subarray(encData.length - 28, encData.length - 16)
+            const tagTail = encData.subarray(encData.length - 16)
+            const cipherTail = encData.subarray(0, encData.length - 28)
+            for (const { name, key } of keyTries) {
+                if (key.length !== 16 && key.length !== 32) continue
+                const result = this.tryGcmDecrypt(key, nonceTail, cipherTail, tagTail)
+                if (result) {
+                    return result
+                }
+            }
+        }
+
+        // 次优先级：nonce = key 前 12 字节，data = [ciphertext][tag 16B]
+        // 来源：Weixin.dll sub_1845E6DB0 (CDN c2c_response decrypt)
+        for (const { name, key } of keyTries) {
+            if (key.length !== 16 && key.length !== 32) continue
+            const nonce = key.subarray(0, 12)
+            const result = this.tryGcmDecrypt(key, nonce, ciphertext, tag)
+            if (result) {
+                return result
+            }
+        }
+
+        // 其他备选布局
+        const layouts = this.buildGcmLayouts(encData)
+        for (const layout of layouts) {
+            for (const { name, key } of keyTries) {
+                if (key.length !== 16 && key.length !== 32) continue
+                const result = this.tryGcmDecrypt(key, layout.nonce, layout.ciphertext, layout.tag)
+                if (result) {
+                    return result
+                }
+            }
+        }
+
+        // ★ 回退：尝试 AES-128-CBC / AES-128-ECB
+        for (const { name, key } of keyTries) {
+            if (key.length !== 16) continue
+            // CBC 变体 1（IDA sub_180C80320）：IV = key 本身
+            if (encData.length >= 16 && encData.length % 16 === 0) {
+                try {
+                    const dec = crypto.createDecipheriv('aes-128-cbc', key, key)
+                    dec.setAutoPadding(true)
+                    const result = Buffer.concat([dec.update(encData), dec.final()])
+                    if (this.isValidImageBuffer(result)) {
+                        return result
+                    }
+                    for (const fn of [zlib.inflateSync, zlib.gunzipSync]) {
+                        try {
+                            const d = fn(result)
+                            if (this.isValidImageBuffer(d)) {
+                                return d
+                            }
+                        } catch { }
+                    }
+                } catch { }
+            }
+            // CBC 变体 2：前 16 字节作为 IV
+            if (encData.length > 32) {
+                try {
+                    const iv = encData.subarray(0, 16)
+                    const cbcData = encData.subarray(16)
+                    const dec = crypto.createDecipheriv('aes-128-cbc', key, iv)
+                    dec.setAutoPadding(true)
+                    const result = Buffer.concat([dec.update(cbcData), dec.final()])
+                    if (this.isValidImageBuffer(result)) {
+                        return result
+                    }
+                    // CBC + zlib
+                    for (const fn of [zlib.inflateSync, zlib.gunzipSync]) {
+                        try {
+                            const d = fn(result)
+                            if (this.isValidImageBuffer(d)) {
+                                return d
+                            }
+                        } catch { }
+                    }
+                } catch { }
+            }
+            // ECB
+            try {
+                const dec = crypto.createDecipheriv('aes-128-ecb', key, null)
+                dec.setAutoPadding(true)
+                const result = Buffer.concat([dec.update(encData), dec.final()])
+                if (this.isValidImageBuffer(result)) {
+                    return result
+                }
+            } catch { }
+        }
+
+        return null
+    }
+
+    /** 构建密钥派生列表 */
+    private buildKeyTries(aesKey: string): { name: string; key: Buffer }[] {
+        const keyTries: { name: string; key: Buffer }[] = []
+        const hexStr = aesKey.replace(/\s/g, '')
+        if (hexStr.length >= 32 && /^[0-9a-fA-F]+$/.test(hexStr)) {
+            try {
+                const keyBuf = Buffer.from(hexStr.slice(0, 32), 'hex')
+                if (keyBuf.length === 16) keyTries.push({ name: 'hex-decode', key: keyBuf })
+            } catch { }
+            // ★ IDA 发现：WeChat 可能直接用 hex 字符串作为 32 字节密钥 → AES-256-GCM
+            // sub_182584DB0 支持 key_len=16/24/32，std::string 传递时长度为 32
+            const rawKey = Buffer.from(hexStr.slice(0, 32), 'utf8')
+            if (rawKey.length === 32) keyTries.push({ name: 'raw-hex-str-32', key: rawKey })
+        }
+        if (aesKey.length >= 16) {
+            keyTries.push({ name: 'utf8-16', key: Buffer.from(aesKey, 'utf8').subarray(0, 16) })
+        }
+        keyTries.push({ name: 'md5', key: crypto.createHash('md5').update(aesKey).digest() })
+        try {
+            const b64Buf = Buffer.from(aesKey, 'base64')
+            if (b64Buf.length >= 16) keyTries.push({ name: 'base64', key: b64Buf.subarray(0, 16) })
+        } catch { }
+        return keyTries
+    }
+
+    /** 构建多种 GCM 数据布局（nonce + ciphertext + tag 的不同拆分方式） */
+    private buildGcmLayouts(encData: Buffer): { name: string; nonce: Buffer; ciphertext: Buffer; tag: Buffer }[] {
+        const layouts: { name: string; nonce: Buffer; ciphertext: Buffer; tag: Buffer }[] = []
+
+        // 格式 A：GcmData 块格式 — magic \xAB GcmData \xAB\x00 (10B), nonce at offset 19 (12B), payload at offset 63
+        if (encData.length > 63 && encData[0] === 0xAB && encData[8] === 0xAB && encData[9] === 0x00) {
+            const payloadSize = encData.readUInt32LE(10)
+            if (payloadSize > 16 && 63 + payloadSize <= encData.length) {
+                const nonce = encData.subarray(19, 31)
+                const payload = encData.subarray(63, 63 + payloadSize)
+                const tag = payload.subarray(payload.length - 16)
+                const ciphertext = payload.subarray(0, payload.length - 16)
+                layouts.push({ name: 'gcmdata-block', nonce, ciphertext, tag })
+            }
+        }
+
+        // 格式 B：尾部格式 [ciphertext][nonce 12B][tag 16B]（mmcrypto::AesGcmDecrypt）
+        if (encData.length > 28) {
+            layouts.push({
+                name: 'nonce-tail',
+                ciphertext: encData.subarray(0, encData.length - 28),
+                nonce: encData.subarray(encData.length - 28, encData.length - 16),
+                tag: encData.subarray(encData.length - 16)
+            })
+        }
+
+        // 格式 C：前置格式 [nonce 12B][ciphertext][tag 16B]
+        if (encData.length > 28) {
+            layouts.push({
+                name: 'nonce-head',
+                nonce: encData.subarray(0, 12),
+                ciphertext: encData.subarray(12, encData.length - 16),
+                tag: encData.subarray(encData.length - 16)
+            })
+        }
+
+        // 格式 D：零 nonce，[ciphertext][tag 16B]
+        if (encData.length > 16) {
+            layouts.push({
+                name: 'zero-nonce',
+                nonce: Buffer.alloc(12, 0),
+                ciphertext: encData.subarray(0, encData.length - 16),
+                tag: encData.subarray(encData.length - 16)
+            })
+        }
+
+        // 格式 E：前置格式 [nonce 12B][tag 16B][ciphertext]
+        if (encData.length > 28) {
+            layouts.push({
+                name: 'nonce-tag-head',
+                nonce: encData.subarray(0, 12),
+                tag: encData.subarray(12, 28),
+                ciphertext: encData.subarray(28)
+            })
+        }
+
+        return layouts
+    }
+
+    /** 尝试 AES-GCM 解密，根据 key 长度自动选择 128/256，auth tag 通过即返回 */
+    private tryGcmDecrypt(key: Buffer, nonce: Buffer, ciphertext: Buffer, tag: Buffer): Buffer | null {
+        try {
+            const algo = key.length === 32 ? 'aes-256-gcm' : 'aes-128-gcm'
+            const decipher = crypto.createDecipheriv(algo, key, nonce)
+            decipher.setAuthTag(tag)
+            const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()])
+
+            // auth tag 通过 → 解密正确
+            if (this.isValidImageBuffer(decrypted)) return decrypted
+
+            // 尝试 zlib 解压（AesGcmDecryptWithUncompress）
+            for (const fn of [zlib.inflateSync, zlib.gunzipSync, zlib.unzipSync]) {
+                try {
+                    const decompressed = fn(decrypted)
+                    if (this.isValidImageBuffer(decompressed)) return decompressed
+                } catch { }
+            }
+
+            // GCM auth tag 通过但不是已知图片格式，仍然返回（可能是 lottie/tgs 等）
+            console.log('[SnsService] GCM auth tag 通过但非已知图片格式', {
+                size: decrypted.length,
+                headHex: decrypted.subarray(0, 16).toString('hex')
+            })
+            return decrypted
+        } catch {
+            return null
+        }
+    }
+
+    /** 判断 buffer 是否为有效图片头（GIF/PNG/JPEG/WebP） */
+    private isValidImageBuffer(buf: Buffer): boolean {
+        if (!buf || buf.length < 12) return false
+        if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return true // GIF
+        if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) return true // PNG
+        if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return true // JPEG
+        if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 && buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return true // WebP
+        return false
+    }
+
+    /** 根据图片头返回扩展名 */
+    private getImageExtFromBuffer(buf: Buffer): string {
+        if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return '.gif'
+        if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) return '.png'
+        if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return '.jpg'
+        if (buf.length >= 12 && buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 && buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return '.webp'
+        return '.gif'
+    }
+
+    /**
+     * 下载朋友圈评论表情包到本地缓存
+     * 解密说明：优先用 XML 里的 encrypt_url + aes_key（AES-128-GCM，数据格式=[密文][nonce 12B][tag 16B]，解密后 zlib 解压）；
+     * 若只有普通 url 且下载下来是加密数据，会尝试用设置里的「图片 AES 密钥」解密。
+     */
+    async downloadSnsEmoji(url: string, encryptUrl?: string, aesKey?: string): Promise<{ success: boolean; localPath?: string; error?: string }> {
+        if (!url && !encryptUrl) return { success: false, error: 'url 不能为空' }
+
+        const cacheKey = crypto.createHash('md5').update(url || encryptUrl!).digest('hex')
+        const cacheDir = this.getEmojiCacheDir()
+        const fs = require('fs')
+
+
+
+        // 检查本地是否已有缓存
+        const extensions = ['.gif', '.png', '.webp', '.jpg', '.jpeg']
+        for (const ext of extensions) {
+            const filePath = join(cacheDir, `${cacheKey}${ext}`)
+            if (existsSync(filePath)) {
+                return { success: true, localPath: filePath }
+            }
+        }
+
+        // 1. 优先：有 encrypt_url + aes_key 时，下载加密内容并用多种密钥派生尝试 AES 解密
+        if (encryptUrl && aesKey) {
+            const encResult = await this.doDownloadRaw(encryptUrl, cacheKey + '_enc', cacheDir)
+            if (encResult) {
+                const encData = fs.readFileSync(encResult)
+                // 有些情况下 encrypt_url 直接返回明文图片
+                if (this.isValidImageBuffer(encData)) {
+                    const ext = this.getImageExtFromBuffer(encData)
+                    const filePath = join(cacheDir, `${cacheKey}${ext}`)
+                    fs.writeFileSync(filePath, encData)
+                    try { fs.unlinkSync(encResult) } catch { }
+                    return { success: true, localPath: filePath }
+                }
+                const decrypted = this.decryptEmojiAes(encData, aesKey)
+                if (decrypted) {
+                    const ext = this.isValidImageBuffer(decrypted)
+                        ? this.getImageExtFromBuffer(decrypted)
+                        : '.gif' // GCM auth tag 通过但非已知图片格式，默认 .gif
+                    const filePath = join(cacheDir, `${cacheKey}${ext}`)
+                    fs.writeFileSync(filePath, decrypted)
+                    try { fs.unlinkSync(encResult) } catch { }
+                    return { success: true, localPath: filePath }
+                }
+                this.decryptEmojiAes(encData, aesKey, { cacheKey, source: 'encrypt_url' })
+                try { fs.unlinkSync(encResult) } catch { }
+            }
+            // encrypt_url 下载失败或解密失败，继续尝试普通 url
+        }
+
+        // 2. 直接下载 extern_url / cdn_url
+        if (url) {
+            const result = await this.doDownloadRaw(url, cacheKey, cacheDir)
+            if (result) {
+                const buf = fs.readFileSync(result)
+                if (this.isValidImageBuffer(buf)) {
+                    return { success: true, localPath: result }
+                }
+                // 若有 XML 的 aes_key，优先用同一密钥解密（plain url 有时也返回加密数据）
+                if (aesKey) {
+                    const decrypted = this.decryptEmojiAes(buf, aesKey)
+                    if (decrypted) {
+                        const ext = this.isValidImageBuffer(decrypted)
+                            ? this.getImageExtFromBuffer(decrypted)
+                            : '.gif'
+                        const filePath = join(cacheDir, `${cacheKey}${ext}`)
+                        fs.writeFileSync(filePath, decrypted)
+                        try { fs.unlinkSync(result) } catch { }
+                        return { success: true, localPath: filePath }
+                    }
+                    this.decryptEmojiAes(buf, aesKey, { cacheKey, source: 'plain_url' })
+                }
+                // 再尝试用设置里的图片 AES 密钥解密（多种派生）
+                const imageAesKey = this.configService.get('imageAesKey')
+                const keyStr = typeof imageAesKey === 'string' ? imageAesKey.trim() : ''
+                if (keyStr.length >= 16) {
+                    const keyTries: Buffer[] = [
+                        Buffer.from(keyStr, 'ascii').subarray(0, 16),
+                        crypto.createHash('md5').update(keyStr).digest(),
+                    ]
+                    for (const keyBuf of keyTries) {
+                        try {
+                            const decipher = crypto.createDecipheriv('aes-128-ecb', keyBuf, null)
+                            decipher.setAutoPadding(true)
+                            const decrypted = Buffer.concat([decipher.update(buf), decipher.final()])
+                            if (this.isValidImageBuffer(decrypted)) {
+                                const ext = this.getImageExtFromBuffer(decrypted)
+                                const filePath = join(cacheDir, `${cacheKey}${ext}`)
+                                fs.writeFileSync(filePath, decrypted)
+                                try { fs.unlinkSync(result) } catch { }
+                                return { success: true, localPath: filePath }
+                            }
+                        } catch { /* next */ }
+                    }
+                    try {
+                        const decipher = crypto.createDecipheriv('aes-128-ecb', keyTries[0], null)
+                        decipher.setAutoPadding(false)
+                        let decrypted = Buffer.concat([decipher.update(buf), decipher.final()])
+                        if (decrypted.length > 0 && decrypted[decrypted.length - 1] >= 1 && decrypted[decrypted.length - 1] <= 16) {
+                            const pad = decrypted[decrypted.length - 1]
+                            const tail = decrypted.subarray(-pad)
+                            if (tail.every((b: number) => b === pad)) decrypted = decrypted.subarray(0, decrypted.length - pad)
+                        }
+                        if (this.isValidImageBuffer(decrypted)) {
+                            const ext = this.getImageExtFromBuffer(decrypted)
+                            const filePath = join(cacheDir, `${cacheKey}${ext}`)
+                            fs.writeFileSync(filePath, decrypted)
+                            try { fs.unlinkSync(result) } catch { }
+                            return { success: true, localPath: filePath }
+                        }
+                    } catch { /* ignore */ }
+                }
+                try { fs.unlinkSync(result) } catch { }
+            }
+        }
+
+        return { success: false, error: '下载失败' }
+    }
+
+    /**
+     * 下载原始文件到缓存目录
+     */
+    private doDownloadRaw(url: string, cacheKey: string, cacheDir: string): Promise<string | null> {
+        return new Promise((resolve) => {
+            try {
+                let fixedUrl = url.replace(/&amp;/g, '&')
+                // 微信 CDN 使用 HTTP，不强制转 HTTPS（部分 CDN 不支持 HTTPS 会导致下载失败）
+                const https = require('https')
+                const http = require('http')
+                const urlObj = new URL(fixedUrl)
+                const protocol = fixedUrl.startsWith('https') ? https : http
+
+                const options = {
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36 MicroMessenger/7.0.20.1781(0x67001431) NetType/WIFI WindowsWechat/3.9.11.17(0x63090b11)',
+                        'Accept': '*/*',
+                        'Connection': 'keep-alive'
+                    },
+                    rejectUnauthorized: false,
+                    timeout: 15000
+                }
+
+                const request = protocol.get(fixedUrl, options, (response: any) => {
+                    if ([301, 302, 303, 307].includes(response.statusCode)) {
+                        const redirectUrl = response.headers.location
+                        if (redirectUrl) {
+                            const full = redirectUrl.startsWith('http') ? redirectUrl : `${urlObj.protocol}//${urlObj.host}${redirectUrl}`
+                            this.doDownloadRaw(full, cacheKey, cacheDir).then(resolve)
+                            return
+                        }
+                    }
+
+                    if (response.statusCode !== 200) {
+                        resolve(null)
+                        return
+                    }
+
+                    const chunks: Buffer[] = []
+                    response.on('data', (chunk: Buffer) => chunks.push(chunk))
+                    response.on('end', () => {
+                        const buffer = Buffer.concat(chunks)
+                        if (buffer.length === 0) { resolve(null); return }
+
+                        let ext = '.gif'
+                        if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) ext = '.gif'
+                        else if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) ext = '.png'
+                        else if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) ext = '.jpg'
+                        else if (buffer.length >= 12 && buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 && buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50) ext = '.webp'
+
+                        const filePath = join(cacheDir, `${cacheKey}${ext}`)
+                        try {
+                            require('fs').writeFileSync(filePath, buffer)
+                            resolve(filePath)
+                        } catch {
+                            resolve(null)
+                        }
+                    })
+                    response.on('error', () => {
+                        resolve(null)
+                    })
+                })
+
+                request.on('error', () => {
+                    resolve(null)
+                })
+                request.setTimeout(15000, () => {
+                    request.destroy()
+                    resolve(null)
+                })
+            } catch {
+                resolve(null)
+            }
+        })
+    }
+
     private getSnsCacheDir(): string {
         const cachePath = this.configService.getCacheBasePath()
         const snsCacheDir = join(cachePath, 'sns_cache')
@@ -664,38 +1219,62 @@ class SnsService {
         return snsCacheDir
     }
 
-    private getCacheFilePath(url: string): string {
-        const hash = crypto.createHash('md5').update(url).digest('hex')
+    private getCacheFilePath(url: string, md5?: string): string {
+        const hash = md5 || crypto.createHash('md5').update(url).digest('hex')
         const ext = isVideoUrl(url) ? '.mp4' : '.jpg'
         return join(this.getSnsCacheDir(), `${hash}${ext}`)
     }
 
     async getTimeline(limit: number = 20, offset: number = 0, usernames?: string[], keyword?: string, startTime?: number, endTime?: number): Promise<{ success: boolean; timeline?: SnsPost[]; error?: string }> {
-        // 优先尝试使用 DLL 实时读取（推荐）
+        // 优先尝试使用 DLL execQuery 直接查 SnsTimeLine 表（获取完整 XML，包含评论/点赞/表情包）
         try {
-            const dllResult = await wcdbService.getSnsTimeline(limit, offset, usernames, keyword, startTime, endTime)
+            let sql = 'SELECT tid, user_name, content FROM SnsTimeLine WHERE 1=1'
 
-            if (dllResult.success && dllResult.timeline) {
-                // DLL 返回的数据已经包含了点赞和评论，直接使用
-                const enrichedTimeline = await Promise.all(dllResult.timeline.map(async (post: any) => {
-                    // 获取头像
-                    const avatarInfo = await chatService.getContactAvatar(post.username)
+            if (usernames && usernames.length > 0) {
+                const escaped = usernames.map(u => `'${u.replace(/'/g, "''")}'`).join(',')
+                sql += ` AND user_name IN (${escaped})`
+            }
+            if (keyword) {
+                sql += ` AND content LIKE '%${keyword.replace(/'/g, "''")}%'`
+            }
 
-                    // 从 rawXml 中提取视频密钥
-                    const videoKey = extractVideoKey(post.rawXml || '')
+            // 时间范围过滤
+            if (startTime) {
+                sql += ` AND CAST(SUBSTR(CAST(content AS TEXT), INSTR(CAST(content AS TEXT), '<createTime>') + 12, 10) AS INTEGER) >= ${startTime}`
+            }
+            if (endTime) {
+                sql += ` AND CAST(SUBSTR(CAST(content AS TEXT), INSTR(CAST(content AS TEXT), '<createTime>') + 12, 10) AS INTEGER) <= ${endTime}`
+            }
 
-                    // 修正媒体 URL
-                    const fixedMedia = (post.media || []).map((m: any) => {
+            sql += ' ORDER BY tid DESC LIMIT ' + limit + ' OFFSET ' + offset
+
+            const queryResult = await wcdbService.execQuery('sns', '', sql)
+
+            if (queryResult.success && queryResult.rows && queryResult.rows.length > 0) {
+                const timeline: SnsPost[] = await Promise.all(queryResult.rows.map(async (row: any) => {
+                    const xmlContent = row.content || ''
+                    const contact = await chatService.getContact(row.user_name)
+                    const avatarInfo = await chatService.getContactAvatar(row.user_name)
+
+                    const { media, videoKey } = this.parseMediaFromXml(xmlContent)
+
+                    // 提取基本信息
+                    const createTimeMatch = xmlContent.match(/<createTime>(\d+)<\/createTime>/i)
+                    const idMatch = xmlContent.match(/<id>(\d+)<\/id>/i)
+                    const contentDescMatch = xmlContent.match(/<contentDesc(?:\s+[^>]*)?>([^<]*)<\/contentDesc>/i)
+                    const typeMatch = xmlContent.match(/<type>(\d+)<\/type>/i)
+
+                    const fixedMedia = media.map((m) => {
                         const isMediaVideo = isVideoUrl(m.url)
-
                         return {
                             url: fixSnsUrl(m.url, m.token, isMediaVideo),
                             thumb: fixSnsUrl(m.thumb, m.token, false),
                             md5: m.md5,
                             token: m.token,
                             key: isMediaVideo ? (videoKey || m.key) : m.key,
-                            thumbKey: m.thumbKey,
                             encIdx: m.encIdx,
+                            width: m.width,
+                            height: m.height,
                             livePhoto: m.livePhoto ? {
                                 url: fixSnsUrl(m.livePhoto.url, m.livePhoto.token, true),
                                 thumb: fixSnsUrl(m.livePhoto.thumb, m.livePhoto.token, false),
@@ -707,18 +1286,29 @@ class SnsService {
                         }
                     })
 
+                    const likes = this.parseLikesFromXml(xmlContent)
+                    const comments = this.parseCommentsFromXml(xmlContent)
+
                     return {
-                        ...post,
+                        id: idMatch ? idMatch[1] : String(row.tid),
+                        username: row.user_name,
+                        nickname: contact?.remark || contact?.nickName || contact?.alias || row.user_name,
                         avatarUrl: avatarInfo?.avatarUrl,
+                        createTime: createTimeMatch ? parseInt(createTimeMatch[1]) : 0,
+                        contentDesc: contentDescMatch ? contentDescMatch[1] : '',
+                        type: typeMatch ? parseInt(typeMatch[1]) : 1,
                         media: fixedMedia,
-                        shareInfo: extractShareInfo(post.rawXml || '')
+                        shareInfo: extractShareInfo(xmlContent),
+                        likes,
+                        comments,
+                        rawXml: xmlContent
                     }
                 }))
 
-                return { success: true, timeline: enrichedTimeline }
+                return { success: true, timeline }
             }
         } catch (dllError) {
-            console.warn('[SnsService] DLL 读取失败，尝试使用解密后的数据库:', dllError)
+            console.warn('[SnsService] execQuery 读取失败，尝试使用解密后的数据库:', dllError)
         }
 
         // 回退：使用解密后的数据库（数据可能不是最新的）
@@ -727,13 +1317,7 @@ class SnsService {
         }
 
         try {
-            // 先查询总记录数，用于调试
-            const countStmt = this.snsDb!.prepare('SELECT COUNT(*) as total FROM SnsTimeLine')
-            const countResult = countStmt.get() as { total: number }
-            console.log(`[SnsService] 数据库总记录数: ${countResult.total}`)
-
             // 构建 SQL 查询
-            // 注意：表名是 SnsTimeLine，字段是 tid, user_name, content
             let sql = 'SELECT tid, user_name, content FROM SnsTimeLine WHERE 1=1'
             const params: any[] = []
 
@@ -749,32 +1333,22 @@ class SnsService {
                 params.push(`%${keyword}%`)
             }
 
-            // 时间范围过滤（需要从 XML 中提取 createTime）
-            // 暂时跳过时间过滤，因为时间在 XML 中
+            // 时间范围过滤
+            if (startTime) {
+                sql += ` AND CAST(SUBSTR(CAST(content AS TEXT), INSTR(CAST(content AS TEXT), '<createTime>') + 12, 10) AS INTEGER) >= ?`
+                params.push(startTime)
+            }
+            if (endTime) {
+                sql += ` AND CAST(SUBSTR(CAST(content AS TEXT), INSTR(CAST(content AS TEXT), '<createTime>') + 12, 10) AS INTEGER) <= ?`
+                params.push(endTime)
+            }
 
             // 排序和分页（按 tid 降序，tid 越大越新）
             sql += ' ORDER BY tid DESC LIMIT ? OFFSET ?'
             params.push(limit, offset)
 
-            console.log(`[SnsService] SQL 查询: ${sql}`)
-            console.log(`[SnsService] 参数: limit=${limit}, offset=${offset}, usernames=${usernames?.length || 0}, keyword=${keyword || 'none'}`)
-
             const stmt = this.snsDb!.prepare(sql)
             const rows = stmt.all(...params) as any[]
-
-            console.log(`[SnsService] 查询返回 ${rows.length} 条记录`)
-
-            // 检查第一条记录的内容
-            if (rows.length > 0) {
-                const firstRow = rows[0]
-                console.log(`[SnsService] 第一条记录: tid=${firstRow.tid}, user_name=${firstRow.user_name}, content长度=${firstRow.content?.length || 0}`)
-
-                // 检查 content 是否为空
-                const emptyContentCount = rows.filter(r => !r.content || r.content.trim().length === 0).length
-                if (emptyContentCount > 0) {
-                    console.warn(`[SnsService] 警告: ${emptyContentCount} 条记录的 content 字段为空`)
-                }
-            }
 
             // 解析每条记录
             const timeline: SnsPost[] = await Promise.all(rows.map(async (row) => {
@@ -846,17 +1420,6 @@ class SnsService {
                 const likes = this.parseLikesFromXml(xmlContent)
                 const comments = this.parseCommentsFromXml(xmlContent)
 
-                // 临时调试：打印第一条动态的 XML 看看结构
-                if (offset === 0 && rows.indexOf(row) === 0) {
-                    console.log('[SnsService] 第一条动态的 XML 片段（点赞评论部分）:')
-                    const likeMatch = xmlContent.match(/<LikeUserList>[\s\S]*?<\/LikeUserList>/i)
-                    const commentMatch = xmlContent.match(/<CommentUserList>[\s\S]*?<\/CommentUserList>/i)
-                    if (likeMatch) console.log('点赞:', likeMatch[0].substring(0, 500))
-                    if (commentMatch) console.log('评论:', commentMatch[0].substring(0, 500))
-                    console.log('解析结果 - 点赞:', likes)
-                    console.log('解析结果 - 评论:', comments)
-                }
-
                 return {
                     id: snsId,
                     username: row.user_name,
@@ -880,10 +1443,10 @@ class SnsService {
         }
     }
 
-    async proxyImage(url: string, key?: string | number): Promise<{ success: boolean; dataUrl?: string; videoPath?: string; localPath?: string; error?: string }> {
+    async proxyImage(url: string, key?: string | number, md5?: string): Promise<{ success: boolean; dataUrl?: string; videoPath?: string; localPath?: string; error?: string }> {
         if (!url) return { success: false, error: 'url 不能为空' }
 
-        const result = await this.fetchAndDecryptImage(url, key)
+        const result = await this.fetchAndDecryptImage(url, key, md5)
         if (result.success) {
             // 视频返回文件路径
             if (result.contentType?.startsWith('video/')) {
@@ -902,15 +1465,15 @@ class SnsService {
         return { success: false, error: result.error }
     }
 
-    async downloadImage(url: string, key?: string | number): Promise<{ success: boolean; data?: Buffer; contentType?: string; cachePath?: string; error?: string }> {
-        return this.fetchAndDecryptImage(url, key)
+    async downloadImage(url: string, key?: string | number, md5?: string): Promise<{ success: boolean; data?: Buffer; contentType?: string; cachePath?: string; error?: string }> {
+        return this.fetchAndDecryptImage(url, key, md5)
     }
 
-    private async fetchAndDecryptImage(url: string, key?: string | number): Promise<{ success: boolean; data?: Buffer; contentType?: string; cachePath?: string; error?: string }> {
+    private async fetchAndDecryptImage(url: string, key?: string | number, md5?: string): Promise<{ success: boolean; data?: Buffer; contentType?: string; cachePath?: string; error?: string }> {
         if (!url) return { success: false, error: 'url 不能为空' }
 
         const isVideo = isVideoUrl(url)
-        const cachePath = this.getCacheFilePath(url)
+        const cachePath = this.getCacheFilePath(url, md5)
 
         // 1. 检查缓存（优先返回本地文件）
         if (existsSync(cachePath)) {
@@ -998,7 +1561,7 @@ class SnsService {
                                         // 验证 MP4 签名 ('ftyp' at offset 4)
                                         const ftyp = raw.subarray(4, 8).toString('ascii')
                                         if (ftyp !== 'ftyp') {
-                                            console.warn('[SnsService] 视频解密后签名验证失败，ftyp:', ftyp)
+                                            // 签名验证失败，静默处理
                                         }
                                     } catch (err) {
                                         console.error(`[SnsService] 视频解密出错: ${err}`)

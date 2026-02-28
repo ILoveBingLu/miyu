@@ -1,6 +1,11 @@
 import type { ChatSession, Message, Contact, ContactInfo } from './models'
 import type { SummaryResult } from './ai'
 
+export interface ImageListItem {
+  imagePath: string
+  liveVideoPath?: string
+}
+
 export interface ElectronAPI {
   window: {
     minimize: () => void
@@ -9,7 +14,8 @@ export interface ElectronAPI {
     splashReady: () => void
     onSplashFadeOut?: (callback: () => void) => () => void
     openChatWindow: () => Promise<boolean>
-    openMomentsWindow: () => Promise<boolean>
+    openMomentsWindow: (filterUsername?: string) => Promise<boolean>
+    onMomentsFilterUser: (callback: (username: string) => void) => () => void
     openGroupAnalyticsWindow: () => Promise<boolean>
     openAnnualReportWindow: (year: number) => Promise<boolean>
     openAgreementWindow: () => Promise<boolean>
@@ -19,12 +25,13 @@ export interface ElectronAPI {
     isChatWindowOpen: () => Promise<boolean>
     closeChatWindow: () => Promise<boolean>
     setTitleBarOverlay: (options: { symbolColor: string }) => void
-    openImageViewerWindow: (imagePath: string, liveVideoPath?: string) => Promise<void>
+    openImageViewerWindow: (imagePath: string, liveVideoPath?: string, imageList?: ImageListItem[]) => Promise<void>
     openVideoPlayerWindow: (videoPath: string, videoWidth?: number, videoHeight?: number) => Promise<void>
     openBrowserWindow: (url: string, title?: string) => Promise<void>
     resizeToFitVideo: (videoWidth: number, videoHeight: number) => Promise<void>
     openAISummaryWindow: (sessionId: string, sessionName: string) => Promise<boolean>
     openChatHistoryWindow: (sessionId: string, messageId: number) => Promise<boolean>
+    onImageListUpdate: (callback: (data: { imageList: ImageListItem[], currentIndex: number }) => void) => () => void
   }
   config: {
     get: (key: string) => Promise<unknown>
@@ -192,6 +199,34 @@ export interface ElectronAPI {
       error?: string
       md5?: string
     }>
+    parseChannelVideo: (content: string) => Promise<{
+      success: boolean
+      error?: string
+      videoInfo?: {
+        objectId: string
+        title: string
+        author: string
+        avatar?: string
+        videoUrl: string
+        thumbUrl?: string
+        coverUrl?: string
+        duration?: number
+        width?: number
+        height?: number
+      }
+    }>
+    downloadChannelVideo: (videoInfo: any, key?: string) => Promise<{
+      success: boolean
+      filePath?: string
+      error?: string
+      needsKey?: boolean
+    }>
+    onDownloadProgress: (callback: (progress: {
+      objectId: string
+      downloaded: number
+      total: number
+      percentage: number
+    }) => void) => () => void
   }
   imageKey: {
     getImageKeys: (userDir: string) => Promise<{ success: boolean; xorKey?: number; aesKey?: string; error?: string }>
@@ -316,8 +351,13 @@ export interface ElectronAPI {
       success: boolean
       error?: string
     }>
+    downloadEmoji: (params: { url: string; encryptUrl?: string; aesKey?: string }) => Promise<{
+      success: boolean
+      localPath?: string
+      error?: string
+    }>
     writeExportFile: (filePath: string, content: string) => Promise<{ success: boolean; error?: string }>
-    saveMediaToDir: (params: { url: string; key?: string | number; outputDir: string; index: number }) => Promise<{ success: boolean; fileName?: string; error?: string }>
+    saveMediaToDir: (params: { url: string; key?: string | number; outputDir: string; index: number; md5?: string; isAvatar?: boolean; username?: string; isEmoji?: boolean; encryptUrl?: string; aesKey?: string }) => Promise<{ success: boolean; fileName?: string; error?: string }>
   }
   analytics: {
     getOverallStatistics: () => Promise<{

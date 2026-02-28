@@ -47,6 +47,8 @@ export interface Message {
   quotedContent?: string
   quotedSender?: string
   quotedImageMd5?: string
+  quotedEmojiMd5?: string
+  quotedEmojiCdnUrl?: string
   // 图片相关
   imageMd5?: string
   imageDatName?: string
@@ -112,6 +114,7 @@ class ChatService extends EventEmitter {
   private emoticonDb: Database.Database | null = null
   private emotionDb: Database.Database | null = null
   private headImageDb: Database.Database | null = null
+  private miscDb: Database.Database | null = null
   private messageDbCache: Map<string, Database.Database> = new Map()
   private dbDir: string | null = null
 
@@ -323,6 +326,11 @@ class ChatService extends EventEmitter {
         this.headImageDb = new Database(headImageDbPath, { readonly: true })
       }
 
+      const miscDbPath = path.join(dbDir, 'misc.db')
+      if (fs.existsSync(miscDbPath)) {
+        this.miscDb = new Database(miscDbPath, { readonly: true })
+      }
+
       // 连接时强制清除所有缓存，确保获取最新数据
       // 这解决了增量更新后重新打开窗口时数据不刷新的问题
       this.sessionTableCache.clear()
@@ -350,6 +358,7 @@ class ChatService extends EventEmitter {
       this.emoticonDb?.close()
       this.emotionDb?.close()
       this.headImageDb?.close()
+      this.miscDb?.close()
       this.messageDbCache.forEach(db => {
         try { db.close() } catch { }
       })
@@ -1096,6 +1105,8 @@ class ChatService extends EventEmitter {
             let quotedContent: string | undefined
             let quotedSender: string | undefined
             let quotedImageMd5: string | undefined
+            let quotedEmojiMd5: string | undefined
+            let quotedEmojiCdnUrl: string | undefined
             let imageMd5: string | undefined
             let imageDatName: string | undefined
             let isLivePhoto: boolean | undefined
@@ -1126,6 +1137,8 @@ class ChatService extends EventEmitter {
               quotedContent = quoteInfo.content
               quotedSender = quoteInfo.sender
               quotedImageMd5 = quoteInfo.imageMd5
+              quotedEmojiMd5 = quoteInfo.emojiMd5
+              quotedEmojiCdnUrl = quoteInfo.emojiCdnUrl
             }
 
             // 解析文件消息 (localType === 49 且 XML 中 type=6)
@@ -1180,6 +1193,8 @@ class ChatService extends EventEmitter {
               quotedContent,
               quotedSender,
               quotedImageMd5,
+              quotedEmojiMd5,
+              quotedEmojiCdnUrl,
               imageMd5,
               imageDatName,
               isLivePhoto,
@@ -1588,6 +1603,8 @@ class ChatService extends EventEmitter {
             let quotedContent: string | undefined
             let quotedSender: string | undefined
             let quotedImageMd5: string | undefined
+            let quotedEmojiMd5: string | undefined
+            let quotedEmojiCdnUrl: string | undefined
             let imageMd5: string | undefined
             let imageDatName: string | undefined
             let isLivePhoto: boolean | undefined
@@ -1615,6 +1632,8 @@ class ChatService extends EventEmitter {
               quotedContent = quoteInfo.content
               quotedSender = quoteInfo.sender
               quotedImageMd5 = quoteInfo.imageMd5
+              quotedEmojiMd5 = quoteInfo.emojiMd5
+              quotedEmojiCdnUrl = quoteInfo.emojiCdnUrl
             }
 
             let fileName: string | undefined
@@ -1667,6 +1686,8 @@ class ChatService extends EventEmitter {
               quotedContent,
               quotedSender,
               quotedImageMd5,
+              quotedEmojiMd5,
+              quotedEmojiCdnUrl,
               imageMd5,
               imageDatName,
               isLivePhoto,
@@ -1801,18 +1822,23 @@ class ChatService extends EventEmitter {
         return '[图片]'
       case 34:
         return '[语音消息]'
-      case 42:
-        return '[名片]'
+      case 42: {
+        const nickname = content.match(/nickname="([^"]*)"/)?.[1]
+        return nickname ? `[名片] ${nickname}` : '[名片]'
+      }
       case 43:
         return '[视频]'
       case 47:
         return '[动画表情]'
-      case 48:
-        return '[位置]'
+      case 48: {
+        const poiname = content.match(/poiname="([^"]*)"/)?.[1]
+        const label = content.match(/label="([^"]*)"/)?.[1]
+        return poiname ? `[位置] ${poiname}` : label ? `[位置] ${label}` : '[位置]'
+      }
       case 49:
         return this.parseType49(content)
       case 50:
-        return '[通话]'
+        return this.parseVoipMessage(content)
       case 10000:
         return this.cleanSystemMessage(content)
       case 244813135921:
@@ -1870,6 +1896,25 @@ class ChatService extends EventEmitter {
         return payMemo ? `[转账] ${feedesc} ${payMemo}` : `[转账] ${feedesc}`
       }
       return '[转账]'
+    }
+
+    // 红包消息
+    if (type === '2001') {
+      const greeting = this.extractXmlValue(content, 'receivertitle') || this.extractXmlValue(content, 'sendertitle')
+      return greeting ? `[红包] ${greeting}` : '[红包]'
+    }
+
+    // 微信礼物
+    if (type === '115') {
+      const wish = this.extractXmlValue(content, 'wishmessage')
+      const skutitle = this.extractXmlValue(content, 'skutitle')
+      return skutitle ? `[微信礼物] ${wish || '送你一份心意'} - ${skutitle}` : `[微信礼物] ${wish || '送你一份心意'}`
+    }
+
+    // 音乐分享
+    if (type === '3') {
+      const des = this.extractXmlValue(content, 'des')
+      return title ? `[音乐] ${title}${des ? ` - ${des}` : ''}` : '[音乐]'
     }
 
     if (title) {
@@ -2178,7 +2223,7 @@ class ChatService extends EventEmitter {
   /**
    * 解析引用消息
    */
-  private parseQuoteMessage(content: string): { content?: string; sender?: string; imageMd5?: string } {
+  private parseQuoteMessage(content: string): { content?: string; sender?: string; imageMd5?: string; emojiMd5?: string; emojiCdnUrl?: string } {
     try {
       // 提取 refermsg 部分
       const referMsgStart = content.indexOf('<refermsg>')
@@ -2212,8 +2257,9 @@ class ChatService extends EventEmitter {
           break
         case '3':
           displayContent = '[图片]'
-          // 尝试从引用的内容 XML 中提取图片 MD5
-          const innerMd5 = this.extractXmlValue(referContent, 'md5')
+          // 尝试从引用的内容 XML 中提取图片 MD5（标签或属性）
+          const innerMd5 = this.extractXmlValue(referContent, 'md5') ||
+            (referContent.match(/\bmd5="([a-f0-9]+)"/i)?.[1])
           imageMd5 = innerMd5 || undefined
           break
         case '34':
@@ -2224,7 +2270,14 @@ class ChatService extends EventEmitter {
           break
         case '47':
           displayContent = '[动画表情]'
-          break
+          // 提取表情包信息用于引用显示
+          const emojiInfo = this.parseEmojiInfo(referContent)
+          return {
+            content: displayContent,
+            sender: displayName,
+            emojiMd5: emojiInfo.md5,
+            emojiCdnUrl: emojiInfo.cdnUrl
+          }
         case '49':
           const appTitle = this.extractXmlValue(referContent, 'title')
           displayContent = appTitle || '[链接]'
@@ -2279,6 +2332,11 @@ class ChatService extends EventEmitter {
     // 标准化空白
     result = result.replace(/\s+/g, ' ').trim()
     return result
+  }
+
+  private parseVoipMessage(content: string): string {
+    const msg = this.extractXmlValue(content, 'msg')
+    return msg || '通话'
   }
 
   private getMessageTypeLabel(localType: number): string {
@@ -2863,6 +2921,158 @@ class ChatService extends EventEmitter {
     } catch (e) {
       console.error('ChatService: 获取当前用户信息失败:', e)
       return { success: false, error: String(e) }
+    }
+  }
+
+  /**
+   * 从 misc.db 获取 UIN（微信账号ID）
+   * UIN 用于表情包缓存解密的密钥派生
+   */
+  async getUinFromMiscDb(): Promise<string | null> {
+    try {
+      if (!this.miscDb) {
+        const connectResult = await this.connect()
+        if (!connectResult.success) {
+          return null
+        }
+      }
+
+      if (!this.miscDb) {
+        return null
+      }
+
+      // 尝试从 DBInfo 表获取 UIN
+      try {
+        const row = this.miscDb.prepare(`
+          SELECT value FROM DBInfo WHERE key = 'uin'
+        `).get() as any
+
+        if (row && row.value) {
+          return String(row.value)
+        }
+      } catch {
+        // DBInfo 表可能不存在或结构不同
+      }
+
+      // 备选：尝试从其他可能的表获取 UIN
+      try {
+        const tables = this.miscDb.prepare(
+          "SELECT name FROM sqlite_master WHERE type='table'"
+        ).all() as any[]
+
+        for (const table of tables) {
+          const tableName = table.name
+          if (tableName.toLowerCase().includes('info') || tableName.toLowerCase().includes('account')) {
+            try {
+              const columns = this.miscDb.prepare(`PRAGMA table_info(${tableName})`).all() as any[]
+              const columnNames = columns.map((c: any) => c.name)
+
+              if (columnNames.includes('uin')) {
+                const uinRow = this.miscDb.prepare(`SELECT uin FROM ${tableName} LIMIT 1`).get() as any
+                if (uinRow && uinRow.uin) {
+                  return String(uinRow.uin)
+                }
+              }
+            } catch {
+              // 跳过无法查询的表
+            }
+          }
+        }
+      } catch {
+        // 无法扫描表
+      }
+
+      return null
+    } catch (e) {
+      console.error('ChatService: 从 misc.db 获取 UIN 失败:', e)
+      return null
+    }
+  }
+
+  /**
+   * 获取表情包缓存解密所需的 UIN 和 keyString
+   * - UIN: 从 misc.db 获取，或从配置读取
+   * - keyString: 使用 myWxid（已在配置中）
+   */
+  async getEmoticonDecryptionParams(): Promise<{ uin: string | null; keyString: string | null }> {
+    try {
+      // 优先从 misc.db 自动获取 UIN
+      let uin = await this.getUinFromMiscDb()
+
+      // 如果自动获取失败，尝试从配置读取
+      if (!uin) {
+        uin = this.configService.get('emoticonUin') || null
+      }
+
+      // keyString 使用 myWxid
+      const keyString = this.configService.get('myWxid') || null
+
+      return { uin, keyString }
+    } catch (e) {
+      console.error('ChatService: 获取表情包解密参数失败:', e)
+      return { uin: null, keyString: null }
+    }
+  }
+
+  /**
+   * 解密表情包缓存文件
+   * 使用 AES-128-CBC (IV=Key) + XOR 掩码
+   * 密钥派生: MD5(str(UIN) + keyString + "EMOTICON") → 小写十六进制 → 前16字符
+   */
+  async decryptEmoticonCache(filePath: string): Promise<Buffer | null> {
+    try {
+      if (!fs.existsSync(filePath)) {
+        return null
+      }
+
+      // 获取解密参数
+      const params = await this.getEmoticonDecryptionParams()
+      if (!params.uin || !params.keyString) {
+        console.warn('ChatService: 缺少表情包解密参数 (UIN 或 keyString)')
+        return null
+      }
+
+      // 读取加密文件
+      const encryptedBuffer = fs.readFileSync(filePath)
+      if (encryptedBuffer.length === 0) {
+        return null
+      }
+
+      const crypto = require('crypto')
+
+      // 密钥派生: MD5(str(UIN) + keyString + "EMOTICON")
+      const keyMaterial = String(params.uin) + params.keyString + 'EMOTICON'
+      const keyHash = crypto.createHash('md5').update(keyMaterial).digest('hex').toLowerCase()
+      const keyHex = keyHash.substring(0, 16)
+      const key = Buffer.from(keyHex, 'utf8')
+
+      // 复制缓冲区以便修改
+      const workBuffer = Buffer.from(encryptedBuffer)
+
+      // 应用 XOR 掩码到前32字节
+      // XOR 掩码是密钥的重复
+      const xorMask = Buffer.alloc(32)
+      for (let i = 0; i < 32; i++) {
+        xorMask[i] = key[i % key.length]
+      }
+
+      for (let i = 0; i < Math.min(32, workBuffer.length); i++) {
+        workBuffer[i] ^= xorMask[i]
+      }
+
+      // AES-128-CBC 解密，IV = Key
+      const decipher = crypto.createDecipheriv('aes-128-cbc', key, key)
+      decipher.setAutoPadding(true)
+
+      const decrypted = Buffer.concat([
+        decipher.update(workBuffer),
+        decipher.final()
+      ])
+
+      return decrypted
+    } catch (e) {
+      console.error('ChatService: 表情包缓存解密失败:', e)
+      return null
     }
   }
 

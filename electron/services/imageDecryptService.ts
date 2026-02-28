@@ -51,6 +51,7 @@ export class ImageDecryptService {
   private cacheIndexed = false
   private cacheIndexing: Promise<void> | null = null
   private updateFlags = new Map<string, boolean>()
+  private notFoundCache = new Set<string>()  // 失败缓存，避免重复查询
 
   async resolveCachedImage(payload: { sessionId?: string; imageMd5?: string; imageDatName?: string }): Promise<DecryptResult & { hasUpdate?: boolean }> {
     // 不再等待缓存索引，直接查找
@@ -59,7 +60,7 @@ export class ImageDecryptService {
     if (!cacheKey) {
       return { success: false, error: '缺少图片标识' }
     }
-    
+
     // 1. 先检查内存缓存（最快）
     for (const key of cacheKeys) {
       const cached = this.resolvedCache.get(key)
@@ -99,12 +100,12 @@ export class ImageDecryptService {
         return { success: true, localPath, hasUpdate, liveVideoPath }
       }
     }
-    
+
     // 3. 后台启动完整索引（不阻塞当前请求）
     if (!this.cacheIndexed && !this.cacheIndexing) {
       void this.ensureCacheIndexed()
     }
-    
+
     return { success: false, error: '未找到缓存图片' }
   }
 
@@ -114,11 +115,16 @@ export class ImageDecryptService {
       return { success: false, error: '缺少图片标识' }
     }
 
+    // 失败缓存：跳过已知找不到的图片（force 时忽略，允许重试）
+    if (!payload.force && this.notFoundCache.has(cacheKey)) {
+      return { success: false, error: '未找到图片文件' }
+    }
+
     // 即使 force=true，也先检查是否有高清图缓存
     if (payload.force) {
       // 快速查找高清图缓存
-      const hdCached = this.findCachedOutputFast(cacheKey, payload.sessionId, true) || 
-                       this.findCachedOutput(cacheKey, payload.sessionId, true)
+      const hdCached = this.findCachedOutputFast(cacheKey, payload.sessionId, true) ||
+        this.findCachedOutput(cacheKey, payload.sessionId, true)
       if (hdCached && existsSync(hdCached) && this.isImageFile(hdCached)) {
         const localPath = this.filePathToUrl(hdCached)
         const liveVideoPath = this.checkLiveVideoCache(hdCached)
@@ -182,6 +188,7 @@ export class ImageDecryptService {
         return { success: false, error: '未找到高清图，请在微信中点开该图片查看后重试' }
       }
       if (!datPath) {
+        this.notFoundCache.add(cacheKey)
         console.warn(`[ImageDecrypt] 未找到图片文件: ${payload.imageDatName || payload.imageMd5} sessionId=${payload.sessionId}`)
         return { success: false, error: '未找到图片文件' }
       }
@@ -242,6 +249,16 @@ export class ImageDecryptService {
 
       const finalExt = ext || '.jpg'
 
+      // 图片完整性校验：检测解密后的数据是否有完整的结束标记
+      const isImageComplete = this.verifyImageComplete(decrypted, finalExt)
+
+      // 诊断日志：记录关键数据以便定位半白图片的根因
+      const datSize = statSync(datPath).size
+      const datVersion = this.getDatVersion(datPath)
+      if (!isImageComplete) {
+        console.warn(`[ImageDecrypt] 图片不完整! cacheKey=${cacheKey} datPath=${datPath} datSize=${datSize} version=V${datVersion === 0 ? '3' : datVersion === 1 ? '4v1' : '4v2'} decryptedSize=${decrypted.length} ext=${finalExt} headHex=${decrypted.subarray(0, 8).toString('hex')} tailHex=${decrypted.subarray(Math.max(0, decrypted.length - 8)).toString('hex')}`)
+      }
+
       const outputPath = this.getCacheOutputPathFromDat(datPath, finalExt, payload.sessionId)
       await writeFile(outputPath, decrypted)
 
@@ -253,9 +270,13 @@ export class ImageDecryptService {
       }
 
       const isThumb = this.isThumbnailPath(datPath)
-      this.cacheResolvedPaths(cacheKey, payload.imageMd5, payload.imageDatName, outputPath)
-      if (!isThumb) {
-        this.clearUpdateFlags(cacheKey, payload.imageMd5, payload.imageDatName)
+
+      // 如果图片是完整的，才缓存路径映射（不完整的下次重新解密）
+      if (isImageComplete) {
+        this.cacheResolvedPaths(cacheKey, payload.imageMd5, payload.imageDatName, outputPath)
+        if (!isThumb) {
+          this.clearUpdateFlags(cacheKey, payload.imageMd5, payload.imageDatName)
+        }
       }
 
       // 对于 hevc 格式，返回错误提示用户安装 ffmpeg
@@ -966,6 +987,21 @@ export class ImageDecryptService {
     const normalizedKey = this.normalizeDatBase(cacheKey.toLowerCase())
     const extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp']
 
+    // 校验缓存文件是否存在且完整，不完整的自动删除
+    const validateCached = (filePath: string): boolean => {
+      if (!existsSync(filePath)) return false
+      try {
+        const size = statSync(filePath).size
+        if (size <= 100) { unlinkSync(filePath); return false }
+        if (!this.isFileTailValid(filePath, size)) {
+          console.warn(`[ImageDecrypt] 发现不完整缓存图片，已删除: ${filePath} (size=${size})`)
+          unlinkSync(filePath)
+          return false
+        }
+        return true
+      } catch { return false }
+    }
+
     // 遍历所有可能的缓存根路径
     for (const root of allRoots) {
       // 新目录结构: Images/{sessionId}/{年-月}/{文件名}_thumb.jpg 或 _hd.jpg
@@ -987,13 +1023,13 @@ export class ImageDecryptService {
               for (const ext of extensions) {
                 if (preferHd) {
                   const hdPath = join(imageDir, `${normalizedKey}_hd${ext}`)
-                  if (existsSync(hdPath)) return hdPath
+                  if (validateCached(hdPath)) return hdPath
                 }
                 const thumbPath = join(imageDir, `${normalizedKey}_thumb${ext}`)
-                if (existsSync(thumbPath)) return thumbPath
+                if (validateCached(thumbPath)) return thumbPath
                 if (!preferHd) {
                   const hdPath = join(imageDir, `${normalizedKey}_hd${ext}`)
-                  if (existsSync(hdPath)) return hdPath
+                  if (validateCached(hdPath)) return hdPath
                 }
               }
             }
@@ -1022,13 +1058,13 @@ export class ImageDecryptService {
               for (const ext of extensions) {
                 if (preferHd) {
                   const hdPath = join(imageDir, `${normalizedKey}_hd${ext}`)
-                  if (existsSync(hdPath)) return hdPath
+                  if (validateCached(hdPath)) return hdPath
                 }
                 const thumbPath = join(imageDir, `${normalizedKey}_thumb${ext}`)
-                if (existsSync(thumbPath)) return thumbPath
+                if (validateCached(thumbPath)) return thumbPath
                 if (!preferHd) {
                   const hdPath = join(imageDir, `${normalizedKey}_hd${ext}`)
-                  if (existsSync(hdPath)) return hdPath
+                  if (validateCached(hdPath)) return hdPath
                 }
               }
             }
@@ -1044,13 +1080,13 @@ export class ImageDecryptService {
         for (const ext of extensions) {
           if (preferHd) {
             const hdPath = join(oldImageDir, `${normalizedKey}_hd${ext}`)
-            if (existsSync(hdPath)) return hdPath
+            if (validateCached(hdPath)) return hdPath
           }
           const thumbPath = join(oldImageDir, `${normalizedKey}_thumb${ext}`)
-          if (existsSync(thumbPath)) return thumbPath
+          if (validateCached(thumbPath)) return thumbPath
           if (!preferHd) {
             const hdPath = join(oldImageDir, `${normalizedKey}_hd${ext}`)
-            if (existsSync(hdPath)) return hdPath
+            if (validateCached(hdPath)) return hdPath
           }
         }
       }
@@ -1058,7 +1094,7 @@ export class ImageDecryptService {
       // 兼容最旧的平铺结构
       for (const ext of extensions) {
         const candidate = join(root, `${cacheKey}${ext}`)
-        if (existsSync(candidate)) return candidate
+        if (validateCached(candidate)) return candidate
       }
     }
 
@@ -1071,11 +1107,11 @@ export class ImageDecryptService {
    */
   private findCachedOutputFast(cacheKey: string, sessionId?: string, preferHd: boolean = false): string | null {
     if (!sessionId) return null
-    
+
     const normalizedKey = this.normalizeDatBase(cacheKey.toLowerCase())
     const extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp']
     const allRoots = this.getAllCacheRoots()
-    
+
     // 构造最近 3 个月的日期目录
     const now = new Date()
     const recentMonths: string[] = []
@@ -1088,10 +1124,10 @@ export class ImageDecryptService {
     for (const root of allRoots) {
       for (const dateDir of recentMonths) {
         const imageDir = join(root, sessionId, dateDir)
-        
+
         // 批量构造所有可能的路径
         const candidates: string[] = []
-        
+
         if (preferHd) {
           // 优先高清图
           for (const ext of extensions) {
@@ -1109,15 +1145,87 @@ export class ImageDecryptService {
             candidates.push(join(imageDir, `${normalizedKey}_hd${ext}`))
           }
         }
-        
-        // 检查文件是否存在
+
+        // 检查文件是否存在且图片数据完整
         for (const candidate of candidates) {
-          if (existsSync(candidate)) return candidate
+          if (existsSync(candidate)) {
+            try {
+              const size = statSync(candidate).size
+              if (size <= 100) {
+                unlinkSync(candidate)
+                continue
+              }
+              // 快速校验图片末尾完整性（只读最后 64 字节）
+              if (this.isFileTailValid(candidate, size)) {
+                return candidate
+              }
+              // 图片末尾不完整（半截图），删除后让系统重新解密
+              console.warn(`[ImageDecrypt] 发现不完整缓存图片，已删除: ${candidate} (size=${size})`)
+              unlinkSync(candidate)
+            } catch { }
+          }
         }
       }
     }
 
     return null
+  }
+
+  /**
+   * 快速校验缓存图片文件末尾是否完整
+   * 只读取最后 64 字节进行检查，开销极小
+   */
+  private isFileTailValid(filePath: string, fileSize: number): boolean {
+    try {
+      const ext = filePath.toLowerCase()
+      const fs = require('fs')
+      const fd = fs.openSync(filePath, 'r')
+
+      if (ext.endsWith('.jpg') || ext.endsWith('.jpeg')) {
+        // JPEG: 末尾应有 EOI marker (0xFF 0xD9)
+        const tailSize = Math.min(fileSize, 64)
+        const buf = Buffer.alloc(tailSize)
+        fs.readSync(fd, buf, 0, tailSize, fileSize - tailSize)
+        // 检查末尾是否有 EOI marker
+        for (let i = buf.length - 2; i >= 0; i--) {
+          if (buf[i] === 0xFF && buf[i + 1] === 0xD9) {
+            fs.closeSync(fd)
+            return true
+          }
+        }
+        // 可能是 Motion Photo（JPEG + MP4 拼接），检查文件头是否合法 JPEG
+        const headBuf = Buffer.alloc(3)
+        fs.readSync(fd, headBuf, 0, 3, 0)
+        fs.closeSync(fd)
+        // 只要文件头是 FFD8FF 且大于 1KB，认为是有效的（可能是 Motion Photo）
+        if (headBuf[0] === 0xFF && headBuf[1] === 0xD8 && headBuf[2] === 0xFF && fileSize > 1024) {
+          return true
+        }
+        return false
+      }
+
+      if (ext.endsWith('.png')) {
+        // PNG: 末尾应有 IEND chunk
+        const buf = Buffer.alloc(12)
+        fs.readSync(fd, buf, 0, 12, fileSize - 12)
+        fs.closeSync(fd)
+        return buf[4] === 0x49 && buf[5] === 0x45 && buf[6] === 0x4E && buf[7] === 0x44
+      }
+
+      if (ext.endsWith('.gif')) {
+        // GIF: 末尾应有 0x3B
+        const buf = Buffer.alloc(1)
+        fs.readSync(fd, buf, 0, 1, fileSize - 1)
+        fs.closeSync(fd)
+        return buf[0] === 0x3B
+      }
+
+      fs.closeSync(fd)
+      // WebP 等其他格式暂不校验末尾
+      return true
+    } catch {
+      return true // 读取失败时不阻塞，放行
+    }
   }
 
   /**
@@ -1814,6 +1922,56 @@ export class ImageDecryptService {
     return null
   }
 
+  /**
+   * 验证解密后的图片数据是否完整
+   * JPEG: 末尾应有 EOI marker (0xFF 0xD9)
+   * PNG: 末尾应有 IEND chunk
+   * GIF: 末尾应有 trailer (0x3B)
+   * 不完整的图片不应该被缓存，下次重新解密可能拿到完整数据
+   */
+  private verifyImageComplete(data: Buffer, ext: string): boolean {
+    if (!data || data.length < 100) return false
+
+    const lowerExt = ext.toLowerCase()
+
+    if (lowerExt === '.jpg' || lowerExt === '.jpeg') {
+      // JPEG: 检查是否存在 EOI marker (0xFF 0xD9)
+      // 从末尾往前搜索（有些 JPEG 在 EOI 后有少量附加数据）
+      const searchLen = Math.min(data.length, 64)
+      for (let i = data.length - 2; i >= data.length - searchLen; i--) {
+        if (data[i] === 0xFF && data[i + 1] === 0xD9) {
+          return true
+        }
+      }
+      // Motion Photo 情况：JPEG 后面紧跟 MP4，EOI 在中间位置
+      const quarterStart = Math.floor(data.length * 3 / 4)
+      for (let i = quarterStart; i < data.length - 1; i++) {
+        if (data[i] === 0xFF && data[i + 1] === 0xD9) {
+          return true
+        }
+      }
+      return false
+    }
+
+    if (lowerExt === '.png') {
+      // PNG: 末尾应有 IEND chunk (... 49 45 4E 44 AE 42 60 82)
+      if (data.length < 12) return false
+      const tail = data.subarray(data.length - 12)
+      if (tail[4] === 0x49 && tail[5] === 0x45 && tail[6] === 0x4E && tail[7] === 0x44) {
+        return true
+      }
+      return false
+    }
+
+    if (lowerExt === '.gif') {
+      // GIF: 末尾应有 trailer byte (0x3B)
+      return data[data.length - 1] === 0x3B
+    }
+
+    // WebP 和其他格式暂不做细粒度校验，仅检查最低大小
+    return data.length > 100
+  }
+
   private bufferToDataUrl(buffer: Buffer, ext: string): string | null {
     const mimeType = this.mimeFromExtension(ext)
     if (!mimeType) return null
@@ -1889,7 +2047,7 @@ export class ImageDecryptService {
     }
     if (videoOffset === null || videoOffset <= 100) return null
     if (buf[videoOffset + 4] !== 0x66 || buf[videoOffset + 5] !== 0x74 ||
-        buf[videoOffset + 6] !== 0x79 || buf[videoOffset + 7] !== 0x70) return null
+      buf[videoOffset + 6] !== 0x79 || buf[videoOffset + 7] !== 0x70) return null
     return videoOffset
   }
 
@@ -2074,7 +2232,7 @@ export class ImageDecryptService {
           if (entry.isDirectory()) {
             walk(full)
           } else if (this.isThumbnailPath(full)) {
-            try { unlinkSync(full); deleted++ } catch {}
+            try { unlinkSync(full); deleted++ } catch { }
           }
         }
       }

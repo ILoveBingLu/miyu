@@ -1,3 +1,4 @@
+//更新说明！！！
 import { Package, Image, Mic, Filter, Send, Aperture } from 'lucide-react'
 import './WhatsNewModal.scss'
 
@@ -11,13 +12,13 @@ function WhatsNewModal({ onClose, version }: WhatsNewModalProps) {
         {
             icon: <Package size={20} />,
             title: '优化',
-            desc: '修复并优化部分内容。'
+            desc: '别管优化了什么，反正是优化了好多，记不清了。'
         },
-        {
-            icon: <Image size={20} />,
-            title: '聊天内图片',
-            desc: '支持查看谷歌标准实况图片(iOS端与大疆等实况图片,发送后实况暂不支持)。'
-        }
+        // {
+        //     icon: <Image size={20} />,
+        //     title: '聊天内图片',
+        //     desc: '支持查看谷歌标准实况图片(iOS端与大疆等实况图片,发送后实况暂不支持)。'
+        // }
         // {
         //     icon: <Mic size={20} />,
         //     title: '语音导出',
@@ -28,11 +29,11 @@ function WhatsNewModal({ onClose, version }: WhatsNewModalProps) {
         //     title: '分类导出',
         //     desc: '导出时可按群聊或个人聊天筛选，支持日期范围过滤。'
         // }
-        // {
-        //     icon: <Aperture size={20} />,
-        //     title: '朋友圈',
-        //     desc: '新增朋友圈功能！'
-        // }
+        {
+            icon: <Aperture size={20} />,
+            title: '朋友圈',
+            desc: '评论内的表情包已完成解密！'
+        }
     ]
 
     const handleTelegram = () => {

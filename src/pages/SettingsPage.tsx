@@ -1168,18 +1168,10 @@ function SettingsPage() {
     }
 
     setIsGettingImageKey(true)
-    setImageKeyStatus('正在检查微信进程...')
+    setImageKeyStatus('正在从缓存目录扫描图片密钥...')
 
     try {
-      const isRunning = await window.electronAPI.wxKey.isWeChatRunning()
-      if (!isRunning) {
-        showMessage('请先启动微信并登录', false)
-        setImageKeyStatus('')
-        setIsGettingImageKey(false)
-        return
-      }
-
-      // 构建用户目录路径
+      // 构建用户目录路径（用于 wxid 匹配）
       const userDir = `${dbPath}\\${wxid}`
 
       const removeListener = window.electronAPI.imageKey.onProgress((msg) => {
@@ -1227,12 +1219,12 @@ function SettingsPage() {
   const [isDownloadingWhisperModel, setIsDownloadingWhisperModel] = useState(false)
   const [whisperDownloadProgress, setWhisperDownloadProgress] = useState(0)
   const [useWhisperGpu, setUseWhisperGpu] = useState(false)
-  
+
   // GPU 组件状态
   const [gpuComponentsStatus, setGpuComponentsStatus] = useState<{ installed: boolean; missingFiles?: string[]; gpuDir?: string } | null>(null)
   const [isDownloadingGpuComponents, setIsDownloadingGpuComponents] = useState(false)
   const [gpuDownloadProgress, setGpuDownloadProgress] = useState({ overallProgress: 0, currentFile: '' })
-  
+
   // ========== STT 模式切换 ==========
   const [sttMode, setSttMode] = useState<'cpu' | 'gpu'>('cpu')
 
@@ -1245,12 +1237,12 @@ function SettingsPage() {
       checkGpuComponents()
     }
   }, [activeTab])
-  
+
   const loadSttMode = async () => {
     const savedMode = await window.electronAPI.config.get('sttMode') as 'cpu' | 'gpu' | undefined
     setSttMode(savedMode || 'cpu')
   }
-  
+
   const handleSttModeChange = async (mode: 'cpu' | 'gpu') => {
     setSttMode(mode)
     await window.electronAPI.config.set('sttMode', mode)
@@ -1414,7 +1406,7 @@ function SettingsPage() {
 
   const handleDownloadGpuComponents = async () => {
     if (isDownloadingGpuComponents) return
-    
+
     // 检查是否设置了缓存目录
     if (!cachePath) {
       showMessage('请先设置缓存目录', false)
@@ -1462,14 +1454,14 @@ function SettingsPage() {
     <div className="tab-content">
       {/* STT 模式切换器 */}
       <div className="theme-mode-toggle" style={{ marginBottom: '2rem' }}>
-        <button 
-          className={`mode-btn ${sttMode === 'cpu' ? 'active' : ''}`} 
+        <button
+          className={`mode-btn ${sttMode === 'cpu' ? 'active' : ''}`}
           onClick={() => handleSttModeChange('cpu')}
         >
           <Layers size={16} /> CPU 模式
         </button>
-        <button 
-          className={`mode-btn ${sttMode === 'gpu' ? 'active' : ''}`} 
+        <button
+          className={`mode-btn ${sttMode === 'gpu' ? 'active' : ''}`}
           onClick={() => handleSttModeChange('gpu')}
         >
           <Zap size={16} /> GPU 模式
@@ -1627,9 +1619,9 @@ function SettingsPage() {
           </p>
 
           {/* GPU 状态卡片 */}
-          <div className="gpu-status-card" style={{ 
-            padding: '1rem', 
-            background: 'var(--bg-secondary)', 
+          <div className="gpu-status-card" style={{
+            padding: '1rem',
+            background: 'var(--bg-secondary)',
             borderRadius: '12px',
             marginBottom: '1.5rem',
             border: '1px solid var(--border-color)'
@@ -1656,9 +1648,9 @@ function SettingsPage() {
           </div>
 
           {/* GPU 组件状态 */}
-          <div className="gpu-components-card" style={{ 
-            padding: '1.25rem', 
-            background: 'var(--bg-secondary)', 
+          <div className="gpu-components-card" style={{
+            padding: '1.25rem',
+            background: 'var(--bg-secondary)',
             borderRadius: '12px',
             marginBottom: '1.5rem',
             border: '1px solid var(--border-color)',
@@ -1666,10 +1658,10 @@ function SettingsPage() {
           }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <div style={{ 
-                  width: '32px', 
-                  height: '32px', 
-                  borderRadius: '8px', 
+                <div style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '8px',
                   background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                   display: 'flex',
                   alignItems: 'center',
@@ -1680,11 +1672,11 @@ function SettingsPage() {
                 <strong style={{ fontSize: '15px' }}>GPU 加速组件</strong>
               </div>
               {gpuComponentsStatus?.installed ? (
-                <span style={{ 
-                  fontSize: '13px', 
-                  color: 'var(--success-color)', 
-                  display: 'flex', 
-                  alignItems: 'center', 
+                <span style={{
+                  fontSize: '13px',
+                  color: 'var(--success-color)',
+                  display: 'flex',
+                  alignItems: 'center',
                   gap: '0.25rem',
                   padding: '0.25rem 0.75rem',
                   background: 'var(--success-bg)',
@@ -1694,11 +1686,11 @@ function SettingsPage() {
                   <CheckCircle size={16} /> 已安装
                 </span>
               ) : (
-                <span style={{ 
-                  fontSize: '13px', 
-                  color: 'var(--warning-color)', 
-                  display: 'flex', 
-                  alignItems: 'center', 
+                <span style={{
+                  fontSize: '13px',
+                  color: 'var(--warning-color)',
+                  display: 'flex',
+                  alignItems: 'center',
                   gap: '0.25rem',
                   padding: '0.25rem 0.75rem',
                   background: 'var(--warning-bg)',
@@ -1709,11 +1701,11 @@ function SettingsPage() {
                 </span>
               )}
             </div>
-            
+
             {gpuComponentsStatus?.installed ? (
-              <div style={{ 
-                padding: '0.75rem', 
-                background: 'var(--bg-tertiary)', 
+              <div style={{
+                padding: '0.75rem',
+                background: 'var(--bg-tertiary)',
                 borderRadius: '8px',
                 fontSize: '13px',
                 color: 'var(--text-secondary)',
@@ -1726,9 +1718,9 @@ function SettingsPage() {
               </div>
             ) : (
               <>
-                <div style={{ 
-                  padding: '0.75rem', 
-                  background: 'var(--bg-tertiary)', 
+                <div style={{
+                  padding: '0.75rem',
+                  background: 'var(--bg-tertiary)',
                   borderRadius: '8px',
                   marginBottom: '1rem'
                 }}>
@@ -1743,18 +1735,18 @@ function SettingsPage() {
                 </div>
                 {isDownloadingGpuComponents ? (
                   <div>
-                    <div style={{ 
-                      marginBottom: '0.75rem', 
-                      fontSize: '13px', 
+                    <div style={{
+                      marginBottom: '0.75rem',
+                      fontSize: '13px',
                       color: 'var(--text-primary)',
                       fontWeight: 500,
                       display: 'flex',
                       alignItems: 'center',
                       gap: '0.5rem'
                     }}>
-                      <div className="spinner" style={{ 
-                        width: '14px', 
-                        height: '14px', 
+                      <div className="spinner" style={{
+                        width: '14px',
+                        height: '14px',
                         border: '2px solid var(--border-color)',
                         borderTopColor: 'var(--primary-color)',
                         borderRadius: '50%',
@@ -1762,14 +1754,14 @@ function SettingsPage() {
                       }} />
                       {gpuDownloadProgress.currentFile}
                     </div>
-                    <div style={{ 
-                      background: 'var(--bg-tertiary)', 
-                      borderRadius: '8px', 
+                    <div style={{
+                      background: 'var(--bg-tertiary)',
+                      borderRadius: '8px',
                       overflow: 'hidden',
                       height: '8px',
                       position: 'relative'
                     }}>
-                      <div style={{ 
+                      <div style={{
                         width: `${gpuDownloadProgress.overallProgress}%`,
                         height: '100%',
                         background: 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)',
@@ -1788,10 +1780,10 @@ function SettingsPage() {
                         }} />
                       </div>
                     </div>
-                    <div style={{ 
-                      marginTop: '0.75rem', 
-                      fontSize: '13px', 
-                      textAlign: 'center', 
+                    <div style={{
+                      marginTop: '0.75rem',
+                      fontSize: '13px',
+                      textAlign: 'center',
                       color: 'var(--text-secondary)',
                       fontWeight: 500
                     }}>
@@ -1799,11 +1791,11 @@ function SettingsPage() {
                     </div>
                   </div>
                 ) : (
-                  <button 
+                  <button
                     className="btn-primary"
                     onClick={handleDownloadGpuComponents}
-                    style={{ 
-                      width: '100%', 
+                    style={{
+                      width: '100%',
                       padding: '0.75rem 1rem',
                       borderRadius: '9999px',
                       display: 'flex',

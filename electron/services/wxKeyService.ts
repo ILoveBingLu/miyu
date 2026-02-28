@@ -18,7 +18,7 @@ export class WxKeyService {
     const resourcesPath = app.isPackaged
       ? join(process.resourcesPath, 'resources')
       : join(app.getAppPath(), 'resources')
-    
+
     return join(resourcesPath, 'wx_key.dll')
   }
 
@@ -41,7 +41,7 @@ export class WxKeyService {
     try {
       const result = execSync('tasklist /FI "IMAGENAME eq Weixin.exe" /FO CSV /NH', { encoding: 'utf8' })
       const lines = result.trim().split('\n')
-      
+
       for (const line of lines) {
         if (line.toLowerCase().includes('weixin.exe')) {
           const parts = line.split(',')
@@ -123,7 +123,7 @@ export class WxKeyService {
           continue
         }
       }
-    } catch {}
+    } catch { }
 
     // 常见路径 - 只查找 Weixin.exe
     const drives = ['C', 'D', 'E', 'F']
@@ -155,10 +155,10 @@ export class WxKeyService {
 
     try {
       spawn(wechatPath, [], { detached: true, stdio: 'ignore' }).unref()
-      
+
       // 等待微信启动
       await new Promise(resolve => setTimeout(resolve, 2000))
-      
+
       return this.isWeChatRunning()
     } catch {
       return false
@@ -171,7 +171,7 @@ export class WxKeyService {
   async waitForWeChatWindow(maxWaitSeconds = 15): Promise<boolean> {
     for (let i = 0; i < maxWaitSeconds * 2; i++) {
       await new Promise(resolve => setTimeout(resolve, 500))
-      
+
       // 检查 Weixin.exe 或 WeChat.exe 进程
       const pid = this.getWeChatPid()
       if (pid !== null) {
@@ -188,9 +188,9 @@ export class WxKeyService {
     try {
       const koffi = require('koffi')
       const dllPath = this.getDllPath()
-      
+
       console.log('加载 DLL:', dllPath)
-      
+
       if (!existsSync(dllPath)) {
         console.error('DLL 文件不存在:', dllPath)
         return false
@@ -219,14 +219,14 @@ export class WxKeyService {
 
     try {
       const koffi = require('koffi')
-      
+
       this.onKeyReceived = onKeyReceived
       this.onStatus = onStatus || null
 
       // 定义函数
       const InitializeHook = this.lib.func('bool InitializeHook(uint32_t)')
       const success = InitializeHook(targetPid)
-      
+
       if (success) {
         this.startPolling()
       }
@@ -243,7 +243,7 @@ export class WxKeyService {
    */
   private startPolling(): void {
     this.stopPolling()
-    
+
     this.pollingTimer = setInterval(() => {
       this.pollData()
     }, 100)
@@ -267,16 +267,16 @@ export class WxKeyService {
 
     try {
       const koffi = require('koffi')
-      
+
       // 定义函数
       const PollKeyData = this.lib.func('bool PollKeyData(char*, int32_t)')
       const GetStatusMessage = this.lib.func('bool GetStatusMessage(char*, int32_t, int32_t*)')
-      
+
       // 轮询密钥
       const keyBuffer = Buffer.alloc(65)
       if (PollKeyData(keyBuffer, 65)) {
         const key = keyBuffer.toString('utf8').replace(/\0/g, '').trim()
-        
+
         if (key && this.onKeyReceived) {
           this.onKeyReceived(key)
         }
@@ -286,11 +286,11 @@ export class WxKeyService {
       for (let i = 0; i < 5; i++) {
         const statusBuffer = Buffer.alloc(256)
         const levelBuffer = Buffer.alloc(4)
-        
+
         if (GetStatusMessage(statusBuffer, 256, levelBuffer)) {
           const status = statusBuffer.toString('utf8').replace(/\0/g, '').trim()
           const level = levelBuffer.readInt32LE(0)
-          
+
           if (this.onStatus) {
             this.onStatus(status, level)
           }
@@ -308,7 +308,7 @@ export class WxKeyService {
    */
   uninstallHook(): boolean {
     this.stopPolling()
-    
+
     if (!this.lib) {
       return false
     }
@@ -348,6 +348,42 @@ export class WxKeyService {
   }
 
   /**
+   * 获取图片解密密钥（通过 DLL 本地文件扫描，秒级返回，无需微信进程运行）
+   * 从 kvcomm 缓存目录的 statistic 文件中提取唯一码，计算 XOR 和 AES 密钥
+   */
+  getImageKey(): { success: boolean; json?: string; error?: string } {
+    if (!this.lib) {
+      return { success: false, error: 'DLL 未加载' }
+    }
+
+    try {
+      const koffi = require('koffi')
+      const GetImageKeyFn = this.lib.func('bool GetImageKey(_Out_ char *resultBuffer, int bufferSize)')
+      const GetLastErrorMsgFn = this.lib.func('const char* GetLastErrorMsg()')
+
+      const resultBuffer = Buffer.alloc(8192)
+      const ok = GetImageKeyFn(resultBuffer, resultBuffer.length)
+
+      if (!ok) {
+        let errMsg = '获取图片密钥失败'
+        try {
+          const errPtr = GetLastErrorMsgFn()
+          if (errPtr) {
+            errMsg = typeof errPtr === 'string' ? errPtr : koffi.decode(errPtr, 'char', -1)
+          }
+        } catch { }
+        return { success: false, error: errMsg }
+      }
+
+      const nullIdx = resultBuffer.indexOf(0)
+      const json = resultBuffer.toString('utf8', 0, nullIdx > -1 ? nullIdx : undefined).trim()
+      return { success: true, json }
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
+  }
+
+  /**
    * 检测当前登录的微信账号
    * 通过扫描数据库目录下的账号目录，根据最近修改时间判断当前活跃账号
    * @param dbPath 数据库根路径
@@ -370,13 +406,13 @@ export class WxKeyService {
 
       // 遍历数据库目录下的所有账号目录
       const entries = readdirSync(dbPath, { withFileTypes: true })
-      
+
       for (const entry of entries) {
         if (!entry.isDirectory()) continue
-        
+
         const accountDirName = entry.name
         const accountDir = join(dbPath, accountDirName)
-        
+
         // 检查是否是有效的账号目录（包含 db_storage）
         const dbStorageDir = join(accountDir, 'db_storage')
         if (!existsSync(dbStorageDir)) continue
@@ -387,7 +423,7 @@ export class WxKeyService {
         // 获取账号目录的最近活动时间
         const modifiedTime = this.getAccountModifiedTime(accountDir)
         const timeDiff = Math.abs(now - modifiedTime)
-        
+
         // 检查是否在时间范围内
         if (timeDiff <= maxTimeDiffMs) {
           if (!bestMatch || timeDiff < bestMatch.timeDiff) {
@@ -416,12 +452,12 @@ export class WxKeyService {
       // 如果没有在时间范围内的账号，但有备选账号，询问用户是否使用
       if (fallbackMatch) {
         // 如果只有一个有效账号，直接使用（不管时间差）
-        if (entries.filter(e => e.isDirectory() && 
-            existsSync(join(dbPath, e.name, 'db_storage')) && 
-            !this.isSystemDirectory(e.name)).length === 1) {
+        if (entries.filter(e => e.isDirectory() &&
+          existsSync(join(dbPath, e.name, 'db_storage')) &&
+          !this.isSystemDirectory(e.name)).length === 1) {
           return { wxid: fallbackMatch.wxid, dbPath: fallbackMatch.dbPath }
         }
-        
+
         // 如果时间差在24小时内，自动使用这个账号
         if (fallbackMatch.timeDiff <= 24 * 60 * 60 * 1000) {
           return { wxid: fallbackMatch.wxid, dbPath: fallbackMatch.dbPath }

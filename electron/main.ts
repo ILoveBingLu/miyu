@@ -11,7 +11,7 @@ import { dbPathService } from './services/dbPathService'
 import { wcdbService } from './services/wcdbService'
 import { dataManagementService } from './services/dataManagementService'
 import { imageDecryptService } from './services/imageDecryptService'
-import { imageKeyService } from './services/imageKeyService'
+// imageKeyService 已废弃，图片密钥获取现在通过 wxKeyService.getImageKey() 走 DLL 本地扫描
 import { chatService } from './services/chatService'
 import { analyticsService } from './services/analyticsService'
 import { groupAnalyticsService } from './services/groupAnalyticsService'
@@ -20,6 +20,7 @@ import { exportService, ExportOptions } from './services/exportService'
 import { activationService } from './services/activationService'
 import { LogService } from './services/logService'
 import { videoService } from './services/videoService'
+
 import { voiceTranscribeService } from './services/voiceTranscribeService'
 import { voiceTranscribeServiceWhisper } from './services/voiceTranscribeServiceWhisper'
 import { windowsHelloService, WindowsHelloResult } from './services/windowsHelloService'
@@ -191,6 +192,7 @@ function createWindow() {
     win.loadFile(join(__dirname, '../dist/index.html'))
   }
 
+
   return win
 }
 
@@ -345,13 +347,16 @@ function createGroupAnalyticsWindow() {
 /**
  * 创建独立的朋友圈窗口
  */
-function createMomentsWindow() {
-  // 如果已存在，聚焦到现有窗口
+function createMomentsWindow(filterUsername?: string) {
+  // 如果已存在，聚焦到现有窗口并发送筛选
   if (momentsWindow && !momentsWindow.isDestroyed()) {
     if (momentsWindow.isMinimized()) {
       momentsWindow.restore()
     }
     momentsWindow.focus()
+    if (filterUsername) {
+      momentsWindow.webContents.send('moments:filterUser', filterUsername)
+    }
     return momentsWindow
   }
 
@@ -389,8 +394,9 @@ function createMomentsWindow() {
   const themeParams = getThemeQueryParams()
 
   // 加载朋友圈页面
+  const filterParam = filterUsername ? `&filterUsername=${encodeURIComponent(filterUsername)}` : ''
   if (process.env.VITE_DEV_SERVER_URL) {
-    momentsWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}?${themeParams}#/moments-window`)
+    momentsWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}?${themeParams}${filterParam}#/moments-window`)
 
     momentsWindow.webContents.on('before-input-event', (event, input) => {
       if (input.key === 'F12' || (input.control && input.shift && input.key === 'I')) {
@@ -403,9 +409,11 @@ function createMomentsWindow() {
       }
     })
   } else {
+    const query: Record<string, string> = { theme: configService?.get('theme') || 'cloud-dancer', mode: configService?.get('themeMode') || 'light' }
+    if (filterUsername) query.filterUsername = filterUsername
     momentsWindow.loadFile(join(__dirname, '../dist/index.html'), {
       hash: '/moments-window',
-      query: { theme: configService?.get('theme') || 'cloud-dancer', mode: configService?.get('themeMode') || 'light' }
+      query
     })
   }
 
@@ -737,14 +745,14 @@ function createImageViewerWindow(imagePath: string, liveVideoPath?: string) {
       nodeIntegration: false,
       webSecurity: false // 允许加载本地文件
     },
-    titleBarStyle: 'hidden', // 无边框
+    titleBarStyle: 'hidden',
     titleBarOverlay: {
       color: '#00000000',
       symbolColor: '#ffffff',
       height: 32
     },
     show: false,
-    backgroundColor: '#000000', // 黑色背景
+    backgroundColor: '#000000',
     autoHideMenuBar: true
   })
 
@@ -752,14 +760,10 @@ function createImageViewerWindow(imagePath: string, liveVideoPath?: string) {
     win.show()
   })
 
-  // 获取主题参数
   const themeParams = getThemeQueryParams()
-
-  // 加载图片查看页面
   const imageParam = `imagePath=${encodeURIComponent(imagePath)}`
   const liveVideoParam = liveVideoPath ? `&liveVideoPath=${encodeURIComponent(liveVideoPath)}` : ''
   const queryParams = `${themeParams}&${imageParam}${liveVideoParam}`
-
 
   if (process.env.VITE_DEV_SERVER_URL) {
     win.loadURL(`${process.env.VITE_DEV_SERVER_URL}#/image-viewer-window?${queryParams}`)
@@ -1247,8 +1251,19 @@ function registerIpcHandlers() {
   })
 
   // 打开图片查看窗口
-  ipcMain.handle('window:openImageViewerWindow', (_, imagePath: string, liveVideoPath?: string) => {
-    createImageViewerWindow(imagePath, liveVideoPath)
+  ipcMain.handle('window:openImageViewerWindow', (_, imagePath: string, liveVideoPath?: string, imageList?: Array<{ imagePath: string; liveVideoPath?: string }>) => {
+    const win = createImageViewerWindow(imagePath, liveVideoPath)
+    if (imageList && imageList.length > 1) {
+      const currentIndex = imageList.findIndex(item => item.imagePath === imagePath)
+      win.webContents.once('did-finish-load', () => {
+        if (!win.isDestroyed()) {
+          win.webContents.send('imageViewer:setImageList', {
+            imageList,
+            currentIndex: currentIndex >= 0 ? currentIndex : 0
+          })
+        }
+      })
+    }
   })
 
   // 打开视频播放窗口
@@ -1723,35 +1738,135 @@ function registerIpcHandlers() {
     }
   })
 
-  // 图片密钥获取（从内存）
-  ipcMain.handle('imageKey:getImageKeys', async (event, userDir: string) => {
-    logService?.info('ImageKey', '开始获取图片密钥', { userDir })
+  // 视频号相关
+  ipcMain.handle('video:parseChannelVideo', async (_, content: string) => {
     try {
-      // 获取微信 PID
-      const pid = wxKeyService.getWeChatPid()
-      if (!pid) {
-        logService?.error('ImageKey', '微信进程未运行')
-        return { success: false, error: '微信进程未运行，请先启动微信并登录' }
-      }
+      const videoInfo = videoService.parseChannelVideoFromXml(content)
+      return { success: true, videoInfo }
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
+  })
 
-      const result = await imageKeyService.getImageKeys(
-        userDir,
-        pid,
-        (msg) => {
-          event.sender.send('imageKey:progress', msg)
+  ipcMain.handle('video:downloadChannelVideo', async (event, videoInfo: any, key?: string) => {
+    try {
+      const result = await videoService.downloadChannelVideo(
+        videoInfo,
+        key,
+        (progress) => {
+          // 发送进度更新到渲染进程
+          event.sender.send('video:downloadProgress', {
+            objectId: videoInfo.objectId,
+            ...progress
+          })
         }
       )
+      return result
+    } catch (e: any) {
+      return { success: false, error: e.message || String(e) }
+    }
+  })
 
-      if (result.success) {
-        logService?.info('ImageKey', '图片密钥获取成功', {
-          hasXorKey: result.xorKey !== undefined,
-          hasAesKey: !!result.aesKey
-        })
-      } else {
-        logService?.error('ImageKey', '图片密钥获取失败', { error: result.error })
+  // 图片密钥获取（通过 DLL 从缓存目录获取 code，用前端 wxid 计算密钥）
+  ipcMain.handle('imageKey:getImageKeys', async (event, userDir: string) => {
+    logService?.info('ImageKey', '开始获取图片密钥（DLL 本地扫描模式）', { userDir })
+    try {
+      // 初始化 DLL
+      const initSuccess = await wxKeyService.initialize()
+      if (!initSuccess) {
+        logService?.error('ImageKey', 'DLL 初始化失败')
+        return { success: false, error: 'wx_key.dll 未加载，请确认 DLL 存在' }
       }
 
-      return result
+      event.sender.send('imageKey:progress', '正在从缓存目录扫描图片密钥...')
+
+      // 调用 DLL 的 GetImageKey
+      // DLL 会从 kvcomm 缓存目录获取 code（这部分始终正确）
+      // 但 DLL 的 wxid 发现只搜索固定默认路径，用户自定义存储位置时会找错
+      const dllResult = wxKeyService.getImageKey()
+      if (!dllResult.success || !dllResult.json) {
+        logService?.error('ImageKey', 'DLL GetImageKey 失败', { error: dllResult.error })
+        return { success: false, error: dllResult.error || '获取图片密钥失败' }
+      }
+
+      // 解析 JSON 结果
+      let parsed: any
+      try {
+        parsed = JSON.parse(dllResult.json)
+      } catch {
+        logService?.error('ImageKey', '解析 DLL 返回数据失败', { json: dllResult.json.substring(0, 200) })
+        return { success: false, error: '解析密钥数据失败' }
+      }
+
+      // 从任意账号提取 code 列表（code 来自 kvcomm，与 wxid 无关，所有账号都一样）
+      const accounts: any[] = parsed.accounts ?? []
+      if (!accounts.length || !accounts[0]?.keys?.length) {
+        return { success: false, error: '未找到有效的密钥码（kvcomm 缓存为空）' }
+      }
+
+      const codes: number[] = accounts[0].keys.map((k: any) => k.code)
+      logService?.info('ImageKey', `提取到 ${codes.length} 个密钥码`, {
+        codes,
+        dllFoundWxids: accounts.map((a: any) => a.wxid)
+      })
+
+      // 从 userDir 提取前端已配置好的正确 wxid
+      // 格式: "D:\weixin\xwechat_files\wxid_xxx" → "wxid_xxx"
+      let targetWxid = ''
+      if (userDir) {
+        const dirName = userDir.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? ''
+        if (dirName.startsWith('wxid_')) {
+          targetWxid = dirName
+        }
+      }
+
+      if (!targetWxid) {
+        // 无法从 userDir 提取 wxid，回退到 DLL 发现的第一个
+        targetWxid = accounts[0].wxid
+        logService?.warn('ImageKey', '无法从 userDir 提取 wxid，使用 DLL 发现的', { targetWxid })
+      }
+
+      // CleanWxid: 与 xkey 保持一致，截断到第二个下划线
+      // wxid_g4pshorcc0r529_da6c → wxid_g4pshorcc0r529
+      // wxid_7x2qsltkns1m22 → wxid_7x2qsltkns1m22（不变，只有两段）
+      const cleanWxid = (wxid: string): string => {
+        const first = wxid.indexOf('_')
+        if (first === -1) return wxid
+        const second = wxid.indexOf('_', first + 1)
+        if (second === -1) return wxid
+        return wxid.substring(0, second)
+      }
+      const cleanedWxid = cleanWxid(targetWxid)
+
+      logService?.info('ImageKey', 'wxid 处理', {
+        original: targetWxid,
+        cleaned: cleanedWxid
+      })
+
+      // 用 cleanedWxid + code 计算密钥（与 xkey 算法一致）
+      // xorKey = code & 0xFF
+      // aesKey = MD5(code.toString() + cleanedWxid).substring(0, 16)
+      const crypto = require('crypto')
+      const code = codes[0]
+      const xorKey = code & 0xFF
+      const dataToHash = code.toString() + cleanedWxid
+      const md5Full = crypto.createHash('md5').update(dataToHash).digest('hex')
+      const aesKey = md5Full.substring(0, 16)
+
+      event.sender.send('imageKey:progress', `密钥获取成功 (wxid: ${targetWxid}, code: ${code})`)
+
+      logService?.info('ImageKey', '图片密钥获取成功', {
+        wxid: targetWxid,
+        code,
+        xorKey,
+        aesKey
+      })
+
+      return {
+        success: true,
+        xorKey,
+        aesKey
+      }
     } catch (e) {
       logService?.error('ImageKey', '图片密钥获取异常', { error: String(e) })
       return { success: false, error: String(e) }
@@ -1947,6 +2062,11 @@ function registerIpcHandlers() {
     return result
   })
 
+  ipcMain.handle('sns:downloadEmoji', async (_, params: { url: string; encryptUrl?: string; aesKey?: string }) => {
+    const { snsService } = await import('./services/snsService')
+    return snsService.downloadSnsEmoji(params.url, params.encryptUrl, params.aesKey)
+  })
+
   ipcMain.handle('sns:downloadImage', async (_, params: { url: string; key?: string | number }) => {
     const { snsService } = await import('./services/snsService')
     const { dialog } = await import('electron')
@@ -1987,6 +2107,9 @@ function registerIpcHandlers() {
   ipcMain.handle('sns:writeExportFile', async (_, filePath: string, content: string) => {
     try {
       const fs = await import('fs/promises')
+      const path = await import('path')
+      // 确保目录存在
+      await fs.mkdir(path.dirname(filePath), { recursive: true })
       await fs.writeFile(filePath, content, 'utf-8')
       return { success: true }
     } catch (e: any) {
@@ -1995,18 +2118,57 @@ function registerIpcHandlers() {
   })
 
   // 将朋友圈媒体保存到导出目录
-  ipcMain.handle('sns:saveMediaToDir', async (_, params: { url: string; key?: string | number; outputDir: string; index: number }) => {
+  ipcMain.handle('sns:saveMediaToDir', async (_, params: { url: string; key?: string | number; outputDir: string; index: number; md5?: string; isAvatar?: boolean; username?: string; isEmoji?: boolean; encryptUrl?: string; aesKey?: string }) => {
     try {
       const { snsService } = await import('./services/snsService')
       const fs = await import('fs/promises')
       const path = await import('path')
+      const crypto = await import('crypto')
 
-      // 确保 media 子目录存在
+      // 确保导出目录和 media 子目录存在
       const mediaDir = path.join(params.outputDir, 'media')
       await fs.mkdir(mediaDir, { recursive: true })
 
-      // 下载并解密媒体
-      const result = await snsService.downloadImage(params.url, params.key)
+      // 生成基于内容的唯一文件名
+      let baseName: string
+      if (params.isAvatar && params.username) {
+        // 头像：用 avatar_username
+        baseName = `avatar_${params.username.replace(/[^a-zA-Z0-9_]/g, '_')}`
+      } else if (params.isEmoji) {
+        // 表情包：用 MD5（或者 encryptUrl/url 的 hash）加上 emoji 前缀
+        const hashTarget = params.md5 || params.encryptUrl || params.url
+        baseName = `emoji_${params.md5 || crypto.createHash('md5').update(hashTarget).digest('hex')}`
+      } else if (params.md5) {
+        // 有 MD5 直接使用
+        baseName = params.md5
+      } else {
+        // 没有 MD5，用 URL 的 hash
+        baseName = crypto.createHash('md5').update(params.url).digest('hex')
+      }
+
+      // 如果是表情包，走单独的下载接口
+      if (params.isEmoji) {
+        const result = await snsService.downloadSnsEmoji(params.url, params.encryptUrl, params.aesKey)
+        if (!result.success || !result.localPath) {
+          return { success: false, error: result.error || '表情包下载失败' }
+        }
+
+        const ext = path.extname(result.localPath) || '.gif'
+        const fileName = `${baseName}${ext}`
+        const filePath = path.join(mediaDir, fileName)
+
+        // 如果文件已存在则跳过
+        try {
+          await fs.access(filePath)
+          return { success: true, fileName }
+        } catch { }
+
+        await fs.copyFile(result.localPath, filePath)
+        return { success: true, fileName }
+      }
+
+      // 默认走下载并解密媒体，传入 md5 提高缓存命中率
+      const result = await snsService.downloadImage(params.url, params.key, params.md5)
 
       if (!result.success) {
         return { success: false, error: result.error || '下载失败' }
@@ -2019,8 +2181,16 @@ function registerIpcHandlers() {
       else if (result.contentType?.includes('webp')) ext = '.webp'
       else if (result.contentType?.includes('video')) ext = '.mp4'
 
-      const fileName = `media_${params.index}${ext}`
+      const fileName = `${baseName}${ext}`
       const filePath = path.join(mediaDir, fileName)
+
+      // 如果文件已存在则跳过（避免重复下载）
+      try {
+        await fs.access(filePath)
+        return { success: true, fileName }
+      } catch {
+        // 文件不存在，继续下载
+      }
 
       if (result.data) {
         // 有二进制数据，直接写入
@@ -2098,8 +2268,8 @@ function registerIpcHandlers() {
   })
 
   // 打开朋友圈窗口
-  ipcMain.handle('window:openMomentsWindow', async () => {
-    createMomentsWindow()
+  ipcMain.handle('window:openMomentsWindow', async (_event, filterUsername?: string) => {
+    createMomentsWindow(filterUsername)
     return true
   })
 
