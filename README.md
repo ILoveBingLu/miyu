@@ -7,7 +7,7 @@
 **一款现代化的微信聊天记录查看与分析工具**
 
 [![License](https://img.shields.io/badge/license-CC--BY--NC--SA--4.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-2.2.8-green.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-2.2.9-green.svg)](package.json)
 [![Platform](https://img.shields.io/badge/platform-Windows-0078D6.svg?logo=windows)]()
 [![Electron](https://img.shields.io/badge/Electron-39-47848F.svg?logo=electron)]()
 [![React](https://img.shields.io/badge/React-19-61DAFB.svg?logo=react)]()
@@ -315,10 +315,10 @@ export const useChatStore = create<ChatStore>((set) => ({
 
 | 渠道 | 链接 |
 |:---:|:---|
-| 🌐 **官方网站** | [密语 CipherTalk](https://miyuapp.aiqji.com) |
+| 🌐 **官方网站** | [密语 CipherTalk](https://miyu.aiqji.com) |
 | 🐛 **问题反馈** | [GitHub Issues](https://github.com/ILoveBingLu/CipherTalk/issues) |
 | 💬 **讨论交流** | [GitHub Discussions](https://github.com/ILoveBingLu/CipherTalk/discussions) |
-| 📱 **Telegram 群组** | [加入群聊](https://t.me/+toZ7bY15IZo3NjVl) |
+| 📱 **Telegram 群组** | [加入群聊](https://t.me/CipherTalkChat) |
 | ⭐ **项目主页** | [GitHub Repository](https://github.com/ILoveBingLu/CipherTalk) |
 
 </div>

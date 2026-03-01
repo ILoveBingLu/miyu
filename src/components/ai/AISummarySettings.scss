@@ -238,6 +238,25 @@
     }
   }
 
+  .custom-system-prompt-textarea {
+    width: 100%;
+    min-height: 160px;
+    resize: vertical;
+    padding: 12px 14px;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 13px;
+    line-height: 1.6;
+    outline: none;
+    transition: border-color 0.2s;
+
+    &:focus {
+      border-color: var(--primary);
+    }
+  }
+
   .form-row {
     display: grid;
     grid-template-columns: 1fr 1fr;

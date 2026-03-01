@@ -103,6 +103,10 @@ interface AISummarySettingsProps {
   setDefaultTimeRange: (val: number) => void
   summaryDetail: 'simple' | 'normal' | 'detailed'
   setSummaryDetail: (val: 'simple' | 'normal' | 'detailed') => void
+  systemPromptPreset: 'default' | 'decision-focus' | 'action-focus' | 'risk-focus' | 'custom'
+  setSystemPromptPreset: (val: 'default' | 'decision-focus' | 'action-focus' | 'risk-focus' | 'custom') => void
+  customSystemPrompt: string
+  setCustomSystemPrompt: (val: string) => void
   enableThinking: boolean
   setEnableThinking: (val: boolean) => void
   messageLimit: number
@@ -121,6 +125,10 @@ function AISummarySettings({
   setDefaultTimeRange,
   summaryDetail,
   setSummaryDetail,
+  systemPromptPreset,
+  setSystemPromptPreset,
+  customSystemPrompt,
+  setCustomSystemPrompt,
   enableThinking,
   setEnableThinking,
   messageLimit,
@@ -330,6 +338,13 @@ function AISummarySettings({
     { value: 3, label: '最近 3 天' },
     { value: 7, label: '最近 7 天' },
     { value: 30, label: '最近 30 天' }
+  ]
+  const systemPromptPresetOptions = [
+    { value: 'default', label: '通用平衡（默认）' },
+    { value: 'decision-focus', label: '决策优先（重点提炼结论）' },
+    { value: 'action-focus', label: '行动优先（重点提炼待办）' },
+    { value: 'risk-focus', label: '风险优先（重点识别阻塞与风险）' },
+    { value: 'custom', label: '自定义系统提示词' }
   ]
 
   return (
@@ -556,6 +571,37 @@ function AISummarySettings({
             <span className="detail-desc">完整分析</span>
           </div>
         </div>
+      </div>
+
+      <h3 className="section-title">系统提示词风格</h3>
+      <div className="settings-form" style={{ marginTop: '8px' }}>
+        <div className="form-group">
+          <label>提示词模板</label>
+          <CustomSelect
+            value={systemPromptPreset}
+            onChange={setSystemPromptPreset}
+            options={systemPromptPresetOptions}
+          />
+          <div className="form-hint">
+            选择摘要的分析侧重。若选“自定义系统提示词”，将使用你编写的提示词作为额外系统指令。
+          </div>
+        </div>
+
+        {systemPromptPreset === 'custom' && (
+          <div className="form-group">
+            <label>自定义系统提示词</label>
+            <textarea
+              className="custom-system-prompt-textarea"
+              placeholder="例如：你是一名项目经理助手。请优先输出任务清单，按负责人和截止时间分组。"
+              value={customSystemPrompt}
+              onChange={(e) => setCustomSystemPrompt(e.target.value)}
+              rows={8}
+            />
+            <div className="form-hint">
+              建议描述：角色、输出结构、重点关注项、禁止项。留空则回退默认规则。
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 4. 使用统计 */}

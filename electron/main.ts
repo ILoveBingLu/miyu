@@ -3197,7 +3197,11 @@ function registerIpcHandlers() {
     apiKey: string
     model: string
     detail: 'simple' | 'normal' | 'detailed'
+    systemPromptPreset?: 'default' | 'decision-focus' | 'action-focus' | 'risk-focus' | 'custom'
+    customSystemPrompt?: string
     customRequirement?: string
+    sessionName?: string
+    enableThinking?: boolean
   }) => {
     try {
       const { aiService } = await import('./services/ai/aiService')
@@ -3280,7 +3284,11 @@ function registerIpcHandlers() {
           apiKey: options.apiKey,
           model: options.model,
           detail: options.detail,
-          customRequirement: options.customRequirement
+          systemPromptPreset: options.systemPromptPreset,
+          customSystemPrompt: options.customSystemPrompt,
+          customRequirement: options.customRequirement,
+          sessionName: options.sessionName,
+          enableThinking: options.enableThinking
         },
         (chunk: string) => {
           // 发送流式数据到渲染进程

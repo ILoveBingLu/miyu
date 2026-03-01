@@ -164,6 +164,26 @@
   --logo-invert: 0;
 }
 
+// 樱雾粉主题
+[data-theme="sakura-mist"][data-mode="light"],
+[data-theme="sakura-mist"]:not([data-mode]) {
+  --primary: #D86A8A;
+  --primary-hover: #C55B7A;
+  --primary-light: rgba(216, 106, 138, 0.12);
+  --bg-primary: #FFF2F7;
+  --bg-secondary: rgba(255, 255, 255, 0.82);
+  --bg-tertiary: rgba(216, 106, 138, 0.05);
+  --bg-hover: rgba(216, 106, 138, 0.08);
+  --text-primary: #4B2D38;
+  --text-secondary: #7A5865;
+  --text-tertiary: #A78492;
+  --border-color: rgba(216, 106, 138, 0.16);
+  --bg-gradient: linear-gradient(135deg, #FFF2F7 0%, #FFE6F0 100%);
+  --primary-gradient: linear-gradient(135deg, #D86A8A 0%, #F08FB1 100%);
+  --card-bg: rgba(255, 255, 255, 0.82);
+  --logo-invert: 0;
+}
+
 // ==================== 深色主题 ====================
 
 // 云上舞白 - 深色
@@ -277,6 +297,25 @@
   --bg-gradient: linear-gradient(135deg, #2A0A0A 0%, #3D1414 100%);
   --primary-gradient: linear-gradient(135deg, #E60012 0%, #FF4D4D 100%);
   --card-bg: rgba(50, 20, 20, 0.9);
+  --logo-invert: 1;
+}
+
+// 樱雾粉 - 深色
+[data-theme="sakura-mist"][data-mode="dark"] {
+  --primary: #F08FB1;
+  --primary-hover: #F6A3C0;
+  --primary-light: rgba(240, 143, 177, 0.18);
+  --bg-primary: #24161D;
+  --bg-secondary: rgba(44, 30, 38, 0.92);
+  --bg-tertiary: rgba(255, 255, 255, 0.06);
+  --bg-hover: rgba(255, 255, 255, 0.1);
+  --text-primary: #FFEAF2;
+  --text-secondary: #DDBAC8;
+  --text-tertiary: #AC8796;
+  --border-color: rgba(255, 255, 255, 0.12);
+  --bg-gradient: linear-gradient(135deg, #24161D 0%, #34212A 100%);
+  --primary-gradient: linear-gradient(135deg, #D86A8A 0%, #F08FB1 100%);
+  --card-bg: rgba(44, 30, 38, 0.92);
   --logo-invert: 1;
 }
 

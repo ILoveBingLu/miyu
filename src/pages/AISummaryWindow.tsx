@@ -143,7 +143,7 @@ function AISummaryWindow() {
 
     try {
       // 检查 API 配置 - 使用新的配置服务
-      const { getAiApiKey, getAiProvider, getAiModel, getAiSummaryDetail, getAiEnableThinking } = await import('../services/config')
+      const { getAiApiKey, getAiProvider, getAiModel, getAiSummaryDetail, getAiEnableThinking, getAiSystemPromptPreset, getAiCustomSystemPrompt } = await import('../services/config')
       
       const apiKey = await getAiApiKey()
       console.log('[AISummaryWindow] 当前 API Key:', apiKey ? '已配置' : '未配置', '长度:', apiKey?.length)
@@ -159,8 +159,10 @@ function AISummaryWindow() {
       const model = await getAiModel()
       const detail = await getAiSummaryDetail()
       const enableThinking = await getAiEnableThinking()
+      const systemPromptPreset = await getAiSystemPromptPreset()
+      const customSystemPrompt = await getAiCustomSystemPrompt()
       
-      console.log('[AISummaryWindow] 配置信息:', { provider, model, detail, enableThinking })
+      console.log('[AISummaryWindow] 配置信息:', { provider, model, detail, enableThinking, systemPromptPreset })
 
       // 监听流式输出
       let internalThinkMode = false
@@ -225,6 +227,8 @@ function AISummaryWindow() {
           apiKey: apiKey as string,
           model: model || 'glm-4.5-flash',
           detail: detail || 'normal',
+          systemPromptPreset,
+          customSystemPrompt,
           customRequirement: customRequirement,
           sessionName: sessionName,
           enableThinking: enableThinking !== false  // 默认启用

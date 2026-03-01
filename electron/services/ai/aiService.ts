@@ -28,6 +28,8 @@ export interface SummaryOptions {
   model?: string
   language?: 'zh' | 'en'
   detail?: 'simple' | 'normal' | 'detailed'
+  systemPromptPreset?: 'default' | 'decision-focus' | 'action-focus' | 'risk-focus' | 'custom'
+  customSystemPrompt?: string
   customRequirement?: string  // 用户自定义要求
   sessionName?: string        // 会话名称
   enableThinking?: boolean    // 是否启用思考模式（推理模式）
@@ -163,7 +165,12 @@ class AIService {
   /**
    * 获取系统提示词
    */
-  private getSystemPrompt(language: string = 'zh', detail: string = 'normal'): string {
+  private getSystemPrompt(
+    language: string = 'zh',
+    detail: string = 'normal',
+    preset: 'default' | 'decision-focus' | 'action-focus' | 'risk-focus' | 'custom' = 'default',
+    customSystemPrompt?: string
+  ): string {
     const detailInstructions = {
       simple: '生成极简摘要，字数控制在 100 字以内。只保留最核心的事件和结论，忽略寒暄和琐碎细节。',
       normal: '生成内容适中的摘要。涵盖对话主要话题、关键信息点及明确的约定事项。',
@@ -176,7 +183,7 @@ class AIService {
       detailed: '深度详尽'
     }
 
-    return `### 角色定义
+    const basePrompt = `### 角色定义
 你是一位拥有 10 年经验的高级情报分析师和沟通专家，擅长从琐碎、碎片化的聊天记录中精准提取高价值信息。
 
 ### 任务描述
@@ -210,6 +217,24 @@ ${detailInstructions[detail as keyof typeof detailInstructions] || detailInstruc
 
 ---
 *注：若对应部分无相关内容，请直接忽略该标题。*`
+
+    const presetInstructionMap: Record<string, string> = {
+      'default': '保持通用摘要风格，兼顾信息完整性与可读性。',
+      'decision-focus': '重点提取所有决策、结论、拍板事项。若有意见分歧，请明确分歧点和最终取舍。',
+      'action-focus': '重点提取可执行事项：负责人、截止时间、前置依赖、下一步动作。尽量转写为清单。',
+      'risk-focus': '重点提取风险、阻塞、争议、潜在误解及其影响范围，并给出可执行的缓解建议。'
+    }
+
+    if (preset === 'custom') {
+      const custom = (customSystemPrompt || '').trim()
+      if (custom) {
+        return `${basePrompt}\n\n### 用户自定义系统提示词\n${custom}`
+      }
+      return `${basePrompt}\n\n### 提示\n当前选择了自定义系统提示词，但内容为空。请按默认规则输出。`
+    }
+
+    const presetInstruction = presetInstructionMap[preset] || presetInstructionMap.default
+    return `${basePrompt}\n\n### 风格偏好\n${presetInstruction}`
   }
 
   /**
@@ -433,7 +458,14 @@ ${detailInstructions[detail as keyof typeof detailInstructions] || detailInstruc
     const formattedMessages = this.formatMessages(messages, contacts, options.sessionId)
 
     // 构建提示词
-    const systemPrompt = this.getSystemPrompt(options.language, options.detail)
+    const presetFromConfig = (this.configService.get('aiSystemPromptPreset') as any) || 'default'
+    const customSystemPromptFromConfig = (this.configService.get('aiCustomSystemPrompt') as string) || ''
+    const systemPrompt = this.getSystemPrompt(
+      options.language,
+      options.detail,
+      options.systemPromptPreset || presetFromConfig,
+      options.customSystemPrompt ?? customSystemPromptFromConfig
+    )
 
     // 使用会话名称优化提示词
     const targetName = options.sessionName || options.sessionId

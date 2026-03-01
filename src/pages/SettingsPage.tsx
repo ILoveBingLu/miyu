@@ -132,6 +132,8 @@ function SettingsPage() {
   const [aiModel, setAiModelState] = useState('')
   const [aiDefaultTimeRange, setAiDefaultTimeRangeState] = useState<number>(7)
   const [aiSummaryDetail, setAiSummaryDetailState] = useState<'simple' | 'normal' | 'detailed'>('normal')
+  const [aiSystemPromptPreset, setAiSystemPromptPresetState] = useState<'default' | 'decision-focus' | 'action-focus' | 'risk-focus' | 'custom'>('default')
+  const [aiCustomSystemPrompt, setAiCustomSystemPromptState] = useState<string>('')
   const [aiEnableThinking, setAiEnableThinkingState] = useState<boolean>(true)
   const [aiMessageLimit, setAiMessageLimitState] = useState<number>(3000)
 
@@ -205,6 +207,8 @@ function SettingsPage() {
       const savedAiModel = await configService.getAiModel()
       const savedAiDefaultTimeRange = await configService.getAiDefaultTimeRange()
       const savedAiSummaryDetail = await configService.getAiSummaryDetail()
+      const savedAiSystemPromptPreset = await configService.getAiSystemPromptPreset()
+      const savedAiCustomSystemPrompt = await configService.getAiCustomSystemPrompt()
       const savedAiEnableThinking = await configService.getAiEnableThinking()
       const savedAiMessageLimit = await configService.getAiMessageLimit()
 
@@ -213,6 +217,8 @@ function SettingsPage() {
       setAiModelState(savedAiModel)
       setAiDefaultTimeRangeState(savedAiDefaultTimeRange)
       setAiSummaryDetailState(savedAiSummaryDetail)
+      setAiSystemPromptPresetState(savedAiSystemPromptPreset)
+      setAiCustomSystemPromptState(savedAiCustomSystemPrompt)
       setAiEnableThinkingState(savedAiEnableThinking)
       setAiMessageLimitState(savedAiMessageLimit)
     } catch (e) {
@@ -722,6 +728,8 @@ function SettingsPage() {
       await configService.setAiModel(aiModel)
       await configService.setAiDefaultTimeRange(aiDefaultTimeRange)
       await configService.setAiSummaryDetail(aiSummaryDetail)
+      await configService.setAiSystemPromptPreset(aiSystemPromptPreset)
+      await configService.setAiCustomSystemPrompt(aiCustomSystemPrompt)
       await configService.setAiEnableThinking(aiEnableThinking)
       await configService.setAiMessageLimit(aiMessageLimit)
 
@@ -2593,6 +2601,10 @@ function SettingsPage() {
             setDefaultTimeRange={setAiDefaultTimeRangeState}
             summaryDetail={aiSummaryDetail}
             setSummaryDetail={setAiSummaryDetailState}
+            systemPromptPreset={aiSystemPromptPreset}
+            setSystemPromptPreset={setAiSystemPromptPresetState}
+            customSystemPrompt={aiCustomSystemPrompt}
+            setCustomSystemPrompt={setAiCustomSystemPromptState}
             enableThinking={aiEnableThinking}
             setEnableThinking={setAiEnableThinkingState}
             messageLimit={aiMessageLimit}

@@ -64,6 +64,8 @@ interface ConfigSchema {
   }
   aiDefaultTimeRange: number
   aiSummaryDetail: 'simple' | 'normal' | 'detailed'
+  aiSystemPromptPreset: 'default' | 'decision-focus' | 'action-focus' | 'risk-focus' | 'custom'
+  aiCustomSystemPrompt: string
   aiEnableCache: boolean
   aiEnableThinking: boolean  // 是否显示思考过程
   aiMessageLimit: number     // 摘要提取的消息条数限制
@@ -102,6 +104,8 @@ const defaults: ConfigSchema = {
   aiProviderConfigs: {},  // 空对象，用户配置后填充
   aiDefaultTimeRange: 7, // 默认7天
   aiSummaryDetail: 'normal',
+  aiSystemPromptPreset: 'default',
+  aiCustomSystemPrompt: '',
   aiEnableCache: true,
   aiEnableThinking: true,  // 默认显示思考过程
   aiMessageLimit: 3000     // 默认3000条，用户可调至5000
@@ -198,6 +202,31 @@ export class ConfigService {
         }
       } catch (e) {
         console.error('迁移 AI 配置失败:', e)
+      }
+
+      // 迁移：兼容旧字段 baseUrl -> baseURL
+      try {
+        const aiConfigsRow = this.db.prepare("SELECT value FROM config WHERE key = 'aiProviderConfigs'").get() as { value: string } | undefined
+        if (aiConfigsRow) {
+          const aiConfigs = JSON.parse(aiConfigsRow.value || '{}') as Record<string, any>
+          let changed = false
+
+          for (const providerId of Object.keys(aiConfigs)) {
+            const cfg = aiConfigs[providerId]
+            if (cfg && !cfg.baseURL && cfg.baseUrl) {
+              cfg.baseURL = cfg.baseUrl
+              delete cfg.baseUrl
+              changed = true
+            }
+          }
+
+          if (changed) {
+            this.db.prepare("INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)").run('aiProviderConfigs', JSON.stringify(aiConfigs))
+            console.log('[Config] AI 提供商配置字段已迁移: baseUrl -> baseURL')
+          }
+        }
+      } catch (e) {
+        console.error('迁移 AI baseURL 字段失败:', e)
       }
     } catch (e) {
       console.error('初始化配置数据库失败:', e)
@@ -313,8 +342,16 @@ export class ConfigService {
   }
 
   getAIProviderConfig(providerId: string): { apiKey: string; model: string; baseURL?: string } | null {
-    const configs = this.get('aiProviderConfigs')
-    return configs[providerId] || null
+    const configs = this.get('aiProviderConfigs') as any
+    const providerConfig = configs?.[providerId]
+    if (!providerConfig) return null
+
+    // 兼容历史字段 baseUrl
+    if (!providerConfig.baseURL && providerConfig.baseUrl) {
+      providerConfig.baseURL = providerConfig.baseUrl
+    }
+
+    return providerConfig
   }
 
   setAIProviderConfig(providerId: string, config: { apiKey: string; model: string; baseURL?: string }): void {

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type ThemeId = 'cloud-dancer' | 'corundum-blue' | 'kiwi-green' | 'spicy-red' | 'teal-water' | 'new-year'
+export type ThemeId = 'cloud-dancer' | 'corundum-blue' | 'kiwi-green' | 'spicy-red' | 'teal-water' | 'new-year' | 'sakura-mist'
 export type ThemeMode = 'light' | 'dark' | 'system'
 export type AppIcon = 'default' | 'xinnian'
 
@@ -54,6 +54,13 @@ export const themes: ThemeInfo[] = [
     description: 'Happy New Year 2026',
     primaryColor: '#E60012',
     bgColor: '#FFF0F0'
+  },
+  {
+    id: 'sakura-mist',
+    name: '樱雾粉',
+    description: '温柔、治愈的高级粉',
+    primaryColor: '#D86A8A',
+    bgColor: '#FFF2F7'
   }
 ]
 

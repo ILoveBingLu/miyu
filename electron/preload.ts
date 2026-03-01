@@ -400,6 +400,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       apiKey: string
       model: string
       detail: 'simple' | 'normal' | 'detailed'
+      systemPromptPreset?: 'default' | 'decision-focus' | 'action-focus' | 'risk-focus' | 'custom'
+      customSystemPrompt?: string
+      customRequirement?: string
+      sessionName?: string
+      enableThinking?: boolean
     }) => ipcRenderer.invoke('ai:generateSummary', sessionId, timeRange, options),
     onSummaryChunk: (callback: (chunk: string) => void) => {
       ipcRenderer.on('ai:summaryChunk', (_, chunk) => callback(chunk))

@@ -780,6 +780,8 @@ export interface ElectronAPI {
       apiKey: string
       model: string
       detail: 'simple' | 'normal' | 'detailed'
+      systemPromptPreset?: 'default' | 'decision-focus' | 'action-focus' | 'risk-focus' | 'custom'
+      customSystemPrompt?: string
       customRequirement?: string
       sessionName?: string
       enableThinking?: boolean

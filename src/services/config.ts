@@ -342,7 +342,15 @@ export async function setAiProvider(provider: string): Promise<void> {
 export async function getAiProviderConfig(providerId: string): Promise<{ apiKey: string; model: string; baseURL?: string } | null> {
   const configs = await config.get('aiProviderConfigs')
   const allConfigs = (configs as any) || {}
-  return allConfigs[providerId] || null
+  const providerConfig = allConfigs[providerId]
+  if (!providerConfig) return null
+
+  // 兼容旧字段 baseUrl
+  if (!providerConfig.baseURL && providerConfig.baseUrl) {
+    providerConfig.baseURL = providerConfig.baseUrl
+  }
+
+  return providerConfig
 }
 
 // 设置指定提供商的配置
@@ -372,7 +380,8 @@ export async function setAiApiKey(key: string): Promise<void> {
   const existingConfig = await getAiProviderConfig(currentProvider)
   await setAiProviderConfig(currentProvider, {
     apiKey: key,
-    model: existingConfig?.model || ''
+    model: existingConfig?.model || '',
+    baseURL: existingConfig?.baseURL
   })
 }
 
@@ -389,7 +398,8 @@ export async function setAiModel(model: string): Promise<void> {
   const existingConfig = await getAiProviderConfig(currentProvider)
   await setAiProviderConfig(currentProvider, {
     apiKey: existingConfig?.apiKey || '',
-    model: model
+    model: model,
+    baseURL: existingConfig?.baseURL
   })
 }
 
@@ -413,6 +423,28 @@ export async function getAiSummaryDetail(): Promise<'simple' | 'normal' | 'detai
 // 设置 AI 摘要详细程度
 export async function setAiSummaryDetail(detail: 'simple' | 'normal' | 'detailed'): Promise<void> {
   await config.set('aiSummaryDetail', detail)
+}
+
+// 获取系统提示词模板
+export async function getAiSystemPromptPreset(): Promise<'default' | 'decision-focus' | 'action-focus' | 'risk-focus' | 'custom'> {
+  const value = await config.get('aiSystemPromptPreset')
+  return (value as 'default' | 'decision-focus' | 'action-focus' | 'risk-focus' | 'custom') || 'default'
+}
+
+// 设置系统提示词模板
+export async function setAiSystemPromptPreset(preset: 'default' | 'decision-focus' | 'action-focus' | 'risk-focus' | 'custom'): Promise<void> {
+  await config.set('aiSystemPromptPreset', preset)
+}
+
+// 获取自定义系统提示词
+export async function getAiCustomSystemPrompt(): Promise<string> {
+  const value = await config.get('aiCustomSystemPrompt')
+  return (value as string) || ''
+}
+
+// 设置自定义系统提示词
+export async function setAiCustomSystemPrompt(prompt: string): Promise<void> {
+  await config.set('aiCustomSystemPrompt', prompt || '')
 }
 
 // 获取是否启用思考模式
