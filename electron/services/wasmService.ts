@@ -6,9 +6,9 @@ import vm from 'vm';
 let app: any;
 try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    app = require('electron').app;
+    app = require('electron')?.app;
 } catch (e) {
-    app = { isPackaged: false };
+    app = null;
 }
 
 // This service handles the loading and execution of the WeChat WASM module
@@ -35,13 +35,28 @@ export class WasmService {
 
         this.initPromise = new Promise((resolve, reject) => {
             try {
-                // For dev, files are in electron/assets/wasm
-                // __dirname in dev (from dist-electron) is .../dist-electron
-                // So we need to go up one level and then into electron/assets/wasm
-                const isDev = !app.isPackaged;
-                const basePath = isDev
-                    ? path.join(__dirname, '../electron/assets/wasm')
-                    : path.join(process.resourcesPath, 'assets/wasm'); // Adjust as needed for production build
+                const isPackaged = !!app && app.isPackaged === true;
+                const candidates = isPackaged
+                    ? [path.join(process.resourcesPath, 'assets/wasm')]
+                    : [
+                        path.join(__dirname, '../assets/wasm'),
+                        path.join(__dirname, '../electron/assets/wasm'),
+                        path.join(process.cwd(), 'electron/assets/wasm')
+                    ];
+
+                let basePath = '';
+                for (const p of candidates) {
+                    const wasmCandidate = path.join(p, 'wasm_video_decode.wasm');
+                    const jsCandidate = path.join(p, 'wasm_video_decode.js');
+                    if (fs.existsSync(wasmCandidate) && fs.existsSync(jsCandidate)) {
+                        basePath = p;
+                        break;
+                    }
+                }
+
+                if (!basePath) {
+                    throw new Error(`WASM files not found, checked: ${candidates.join(', ')}`);
+                }
 
                 const wasmPath = path.join(basePath, 'wasm_video_decode.wasm');
                 const jsPath = path.join(basePath, 'wasm_video_decode.js');

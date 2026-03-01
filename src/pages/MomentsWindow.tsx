@@ -44,8 +44,45 @@ interface SnsPost {
   }>
   shareInfo?: SnsShareInfo
   likes: string[]
-  comments: any[]
+  comments: SnsComment[]
   rawXml?: string
+}
+
+interface SnsCommentEmoji {
+  url: string
+  md5: string
+  width: number
+  height: number
+  encryptUrl?: string
+  aesKey?: string
+}
+
+interface SnsCommentImage {
+  url: string
+  token?: string
+  key?: string
+  encIdx?: string
+  thumbUrl?: string
+  thumbUrlToken?: string
+  thumbKey?: string
+  thumbEncIdx?: string
+  width?: number
+  height?: number
+  heightPercentage?: number
+  fileSize?: number
+  minArea?: number
+  mediaId?: string
+  md5?: string
+}
+
+interface SnsComment {
+  id: string
+  nickname: string
+  content: string
+  refCommentId: string
+  refNickname?: string
+  emojis?: SnsCommentEmoji[]
+  images?: SnsCommentImage[]
 }
 
 const isVideoUrl = (url: string) => {
@@ -529,6 +566,7 @@ const ShareThumb = ({ shareInfo }: { shareInfo: SnsShareInfo }) => {
 
 // 表情包内存缓存：url/encryptUrl → file:// 本地路径
 const emojiCache = new Map<string, string>()
+const commentImageCache = new Map<string, string>()
 
 // 评论表情包组件（先查内存缓存，再查本地文件，最后才下载）
 const CommentEmoji = ({ emoji, onPreview }: {
@@ -594,6 +632,69 @@ const CommentEmoji = ({ emoji, onPreview }: {
         position: 'relative',
         zIndex: 5
       }}
+    />
+  )
+}
+
+const CommentImage = ({ image, onPreview }: {
+  image: SnsCommentImage
+  onPreview?: (src: string) => void
+}) => {
+  const targetUrl = image.thumbUrl || image.url
+  const targetKey = image.thumbKey || image.key
+  const cacheKey = `${targetUrl}|${targetKey || ''}`
+  const [localSrc, setLocalSrc] = useState<string>(() => commentImageCache.get(cacheKey) || '')
+
+  useEffect(() => {
+    if (!targetUrl) return
+    if (commentImageCache.has(cacheKey)) {
+      setLocalSrc(commentImageCache.get(cacheKey)!)
+      return
+    }
+    let cancelled = false
+
+    const load = async () => {
+      try {
+        const res = await window.electronAPI.sns.proxyImage({
+          url: targetUrl,
+          key: targetKey
+        })
+        if (cancelled || !res.success) return
+
+        const src = res.localPath
+          ? (res.localPath.startsWith('file:') ? res.localPath : `file://${res.localPath.replace(/\\/g, '/')}`)
+          : (res.dataUrl || '')
+        if (!src) return
+        commentImageCache.set(cacheKey, src)
+        setLocalSrc(src)
+      } catch {
+        // 静默失败
+      }
+    }
+
+    load()
+    return () => { cancelled = true }
+  }, [cacheKey, targetUrl, targetKey])
+
+  if (!localSrc) return null
+
+  return (
+    <img
+      src={localSrc}
+      alt="comment-image"
+      className="comment-image-thumb"
+      draggable={false}
+      style={{
+        pointerEvents: 'auto',
+        position: 'relative',
+        zIndex: 5
+      }}
+      onClick={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        onPreview?.(localSrc)
+      }}
+      referrerPolicy="no-referrer"
     />
   )
 }
@@ -989,6 +1090,29 @@ function MomentsWindow() {
                   }
                 }
               }
+              if (c.images) {
+                for (const img of c.images) {
+                  const thumbUrl = img.thumbUrl || img.url
+                  if (thumbUrl && !mediaUrlSet.has(thumbUrl)) {
+                    mediaUrlSet.add(thumbUrl)
+                    allMediaUrls.push({
+                      type: 'media',
+                      url: thumbUrl,
+                      key: img.thumbKey || img.key,
+                      md5: img.md5
+                    })
+                  }
+                  if (img.url && img.url !== thumbUrl && !mediaUrlSet.has(img.url)) {
+                    mediaUrlSet.add(img.url)
+                    allMediaUrls.push({
+                      type: 'media',
+                      url: img.url,
+                      key: img.key,
+                      md5: img.md5
+                    })
+                  }
+                }
+              }
             }
           }
         }
@@ -1120,19 +1244,28 @@ function MomentsWindow() {
 
         let commentsHtml = ''
         if (p.comments && p.comments.length > 0) {
-          const items = await Promise.all(p.comments.map(async (c: any) => {
+          const items = await Promise.all(p.comments.map(async (c: SnsComment) => {
             const reply = c.refNickname ? `<span class="re">回复</span><b>${escHtml(c.refNickname)}</b>` : ''
             let emojiHtml = ''
             if (c.emojis && c.emojis.length > 0) {
-              emojiHtml = c.emojis.map((emoji: any) => {
+              emojiHtml = c.emojis.map((emoji: SnsCommentEmoji) => {
                 const cacheKey = emoji.encryptUrl || emoji.url
                 const fileUrl = imageCache.get(cacheKey) || emojiCache.get(cacheKey) || '' // 对于导出的表情包，我们可能需要使用对应的路径，由于表情包独立下载可能没存到导出的媒体库，先保留内存路径
                 if (!fileUrl) return ''
                 return `<img src="${escHtml(fileUrl)}" style="width: ${Math.min(emoji.width || 36, 48)}px; height: ${Math.min(emoji.height || 36, 48)}px; vertical-align: middle; margin-left: 2px; border-radius: 6px; cursor: pointer; pointer-events: auto;" onclick="openLightbox('${escHtml(fileUrl)}')" />`
               }).join('')
             }
+            let imageHtml = ''
+            if (c.images && c.images.length > 0) {
+              imageHtml = c.images.map((img: SnsCommentImage) => {
+                const thumbUrl = img.thumbUrl || img.url
+                const fileUrl = imageCache.get(thumbUrl || '') || ''
+                if (!fileUrl) return ''
+                return `<img src="${escHtml(fileUrl)}" style="width: 48px; height: 48px; object-fit: cover; vertical-align: middle; margin-left: 4px; border-radius: 6px; cursor: pointer; pointer-events: auto;" onclick="openLightbox('${escHtml(fileUrl)}')" />`
+              }).join('')
+            }
             const cContentHtml = await parseWechatEmojiHtml(c.content)
-            return `<div class="cmt"><b>${escHtml(c.nickname)}</b>${reply}：${cContentHtml}${emojiHtml}</div>`
+            return `<div class="cmt"><b>${escHtml(c.nickname)}</b>${reply}：${cContentHtml}${emojiHtml}${imageHtml}</div>`
           }))
           commentsHtml = `<div class="interactions${p.likes.length > 0 ? ' cmt-border' : ''}"><div class="cmts">${items.join('')}</div></div>`
         }
@@ -1644,7 +1777,7 @@ document.querySelectorAll('.vi video').forEach(function(v) {
                           )}
                           {post.comments.length > 0 && (
                             <div className="post-comments">
-                              {post.comments.map((comment: any, idx: number) => (
+                              {post.comments.map((comment: SnsComment, idx: number) => (
                                 <div key={comment.id || idx} className="comment-item">
                                   <span className="comment-nickname">{comment.nickname}</span>
                                   {comment.refNickname && (
@@ -1656,8 +1789,11 @@ document.querySelectorAll('.vi video').forEach(function(v) {
                                   <span className="comment-separator">: </span>
                                   <span className="comment-content">
                                     {comment.content && parseWechatEmoji(comment.content)}
-                                    {comment.emojis && comment.emojis.map((emoji: any, eidx: number) => (
+                                    {comment.emojis && comment.emojis.map((emoji: SnsCommentEmoji, eidx: number) => (
                                       <CommentEmoji key={eidx} emoji={emoji} onPreview={(src) => setPreviewImage({ src })} />
+                                    ))}
+                                    {comment.images && comment.images.map((image: SnsCommentImage, iidx: number) => (
+                                      <CommentImage key={`${image.mediaId || image.md5 || image.url || iidx}_${iidx}`} image={image} onPreview={(src) => setPreviewImage({ src })} />
                                     ))}
                                   </span>
                                 </div>

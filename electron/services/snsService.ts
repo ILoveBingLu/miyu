@@ -44,6 +44,43 @@ export interface SnsShareInfo {
     type?: number
 }
 
+export interface SnsCommentEmoji {
+    url: string
+    md5: string
+    width: number
+    height: number
+    encryptUrl?: string
+    aesKey?: string
+}
+
+export interface SnsCommentImage {
+    url: string
+    token?: string
+    key?: string
+    encIdx?: string
+    thumbUrl?: string
+    thumbUrlToken?: string
+    thumbKey?: string
+    thumbEncIdx?: string
+    width?: number
+    height?: number
+    heightPercentage?: number
+    fileSize?: number
+    minArea?: number
+    mediaId?: string
+    md5?: string
+}
+
+export interface SnsComment {
+    id: string
+    nickname: string
+    content: string
+    refCommentId: string
+    refNickname?: string
+    emojis?: SnsCommentEmoji[]
+    images?: SnsCommentImage[]
+}
+
 export interface SnsPost {
     id: string
     username: string
@@ -55,7 +92,7 @@ export interface SnsPost {
     media: SnsMedia[]
     shareInfo?: SnsShareInfo
     likes: string[]
-    comments: { id: string; nickname: string; content: string; refCommentId: string; refNickname?: string; emojis?: { url: string; md5: string; width: number; height: number; encryptUrl?: string; aesKey?: string }[] }[]
+    comments: SnsComment[]
     rawXml?: string
 }
 
@@ -465,10 +502,20 @@ class SnsService {
     /**
      * 从 XML 中解析评论信息
      */
-    private parseCommentsFromXml(xml: string): { id: string; nickname: string; content: string; refCommentId: string; refNickname?: string; emojis?: { url: string; md5: string; width: number; height: number }[] }[] {
+    private parseCommentsFromXml(xml: string): SnsComment[] {
         if (!xml) return []
 
-        type CommentItem = { id: string; nickname: string; username?: string; content: string; refCommentId: string; refUsername?: string; refNickname?: string; emojis?: { url: string; md5: string; width: number; height: number }[] }
+        type CommentItem = {
+            id: string
+            nickname: string
+            username?: string
+            content: string
+            refCommentId: string
+            refUsername?: string
+            refNickname?: string
+            emojis?: SnsCommentEmoji[]
+            images?: SnsCommentImage[]
+        }
         const comments: CommentItem[] = []
         try {
             // 方式1: 查找 <CommentUserList> 标签
@@ -525,7 +572,7 @@ class SnsService {
                 const refUsernameMatch = commentUserXml.match(/<ref_username>([^<]*)<\/ref_username>/i)
 
                 // 提取表情包信息
-                const emojis: { url: string; md5: string; width: number; height: number; encryptUrl?: string; aesKey?: string }[] = []
+                const emojis: SnsCommentEmoji[] = []
                 const emojiRegex = /<emojiinfo>([\s\S]*?)<\/emojiinfo>/gi
                 let emojiMatch
                 while ((emojiMatch = emojiRegex.exec(commentUserXml)) !== null) {
@@ -558,8 +605,46 @@ class SnsService {
                     }
                 }
 
-                // 昵称存在即可（content 可能为空但有表情包）
-                if (nicknameMatch && (contentMatch || emojis.length > 0)) {
+                // 提取评论图片信息（评论图片走 imagelist/imageinfo）
+                const images: SnsCommentImage[] = []
+                const imageRegex = /<imageinfo>([\s\S]*?)<\/imageinfo>/gi
+                let imageMatch
+                while ((imageMatch = imageRegex.exec(commentUserXml)) !== null) {
+                    const imageXml = imageMatch[1]
+                    const pick = (tag: string) => {
+                        const m = imageXml.match(new RegExp(`<${tag}>([^<]*)<\\/${tag}>`, 'i'))
+                        return m ? m[1].trim().replace(/&amp;/g, '&') : ''
+                    }
+                    const parseNum = (value: string) => {
+                        const n = parseInt(value, 10)
+                        return Number.isFinite(n) ? n : undefined
+                    }
+
+                    const imageInfo: SnsCommentImage = {
+                        url: pick('url'),
+                        token: pick('token') || undefined,
+                        key: pick('key') || undefined,
+                        encIdx: pick('enc_idx') || undefined,
+                        thumbUrl: pick('thumb_url') || undefined,
+                        thumbUrlToken: pick('thumb_url_token') || undefined,
+                        thumbKey: pick('thumb_key') || undefined,
+                        thumbEncIdx: pick('thumb_enc_idx') || undefined,
+                        width: parseNum(pick('width')),
+                        height: parseNum(pick('height')),
+                        heightPercentage: parseNum(pick('height_percentage')),
+                        fileSize: parseNum(pick('file_size')),
+                        minArea: parseNum(pick('min_area')),
+                        mediaId: pick('media_id') || undefined,
+                        md5: pick('md5') || undefined
+                    }
+
+                    if (imageInfo.url || imageInfo.thumbUrl) {
+                        images.push(imageInfo)
+                    }
+                }
+
+                // 昵称存在即可（content 可能为空但有表情包/图片）
+                if (nicknameMatch && (contentMatch || emojis.length > 0 || images.length > 0)) {
                     const refCommentId = refCommentIdMatch ? refCommentIdMatch[1].trim() : ''
                     comments.push({
                         id: idMatch ? idMatch[1].trim() : `comment_${Date.now()}_${Math.random()}`,
@@ -569,7 +654,8 @@ class SnsService {
                         refCommentId: (refCommentId === '0') ? '' : refCommentId,
                         refUsername: refUsernameMatch ? refUsernameMatch[1].trim() : undefined,
                         refNickname: refNicknameMatch ? refNicknameMatch[1].trim() : undefined,
-                        emojis: emojis.length > 0 ? emojis : undefined
+                        emojis: emojis.length > 0 ? emojis : undefined,
+                        images: images.length > 0 ? images : undefined
                     })
                 }
             }
@@ -591,6 +677,20 @@ class SnsService {
         }
 
         return comments
+    }
+
+    private normalizeComments(comments: SnsComment[]): SnsComment[] {
+        return comments.map((c) => {
+            const fixedImages = c.images?.map((img) => ({
+                ...img,
+                url: fixSnsUrl(img.url || '', img.token, false),
+                thumbUrl: fixSnsUrl(img.thumbUrl || '', img.thumbUrlToken || img.token, false)
+            }))
+            return {
+                ...c,
+                images: fixedImages
+            }
+        })
     }
 
     /**
@@ -1287,7 +1387,7 @@ class SnsService {
                     })
 
                     const likes = this.parseLikesFromXml(xmlContent)
-                    const comments = this.parseCommentsFromXml(xmlContent)
+                    const comments = this.normalizeComments(this.parseCommentsFromXml(xmlContent))
 
                     return {
                         id: idMatch ? idMatch[1] : String(row.tid),
@@ -1418,7 +1518,7 @@ class SnsService {
 
                 // 提取点赞和评论
                 const likes = this.parseLikesFromXml(xmlContent)
-                const comments = this.parseCommentsFromXml(xmlContent)
+                const comments = this.normalizeComments(this.parseCommentsFromXml(xmlContent))
 
                 return {
                     id: snsId,

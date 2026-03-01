@@ -335,7 +335,38 @@ export interface ElectronAPI {
           }
         }>
         likes: string[]
-        comments: Array<{ id: string; nickname: string; content: string; refCommentId: string; refNickname?: string }>
+        comments: Array<{
+          id: string
+          nickname: string
+          content: string
+          refCommentId: string
+          refNickname?: string
+          emojis?: Array<{
+            url: string
+            md5: string
+            width: number
+            height: number
+            encryptUrl?: string
+            aesKey?: string
+          }>
+          images?: Array<{
+            url: string
+            token?: string
+            key?: string
+            encIdx?: string
+            thumbUrl?: string
+            thumbUrlToken?: string
+            thumbKey?: string
+            thumbEncIdx?: string
+            width?: number
+            height?: number
+            heightPercentage?: number
+            fileSize?: number
+            minArea?: number
+            mediaId?: string
+            md5?: string
+          }>
+        }>
         rawXml?: string
       }>
       error?: string

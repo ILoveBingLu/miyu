@@ -1114,6 +1114,11 @@
     .comment-item {
       line-height: 1.5;
       word-break: break-word;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      column-gap: 2px;
+      row-gap: 4px;
 
       .comment-nickname,
       .comment-ref-nickname {
@@ -1134,6 +1139,26 @@
 
       .comment-content {
         color: var(--text-primary);
+        display: inline-flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 4px;
+        line-height: 1;
+
+        .comment-image-thumb {
+          width: 42px;
+          height: 42px;
+          object-fit: cover;
+          display: block;
+          border-radius: 6px;
+          cursor: pointer;
+          border: 1px solid rgba(0, 0, 0, 0.08);
+          transition: transform 0.15s ease;
+
+          &:hover {
+            transform: scale(1.05);
+          }
+        }
       }
     }
   }
