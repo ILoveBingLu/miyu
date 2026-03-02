@@ -11,7 +11,7 @@ import { dbPathService } from './services/dbPathService'
 import { wcdbService } from './services/wcdbService'
 import { dataManagementService } from './services/dataManagementService'
 import { imageDecryptService } from './services/imageDecryptService'
-// imageKeyService 已废弃，图片密钥获取现在通过 wxKeyService.getImageKey() 走 DLL 本地扫描
+import { imageKeyService } from './services/imageKeyService'  // 内存扫描兜底方案
 import { chatService } from './services/chatService'
 import { analyticsService } from './services/analyticsService'
 import { groupAnalyticsService } from './services/groupAnalyticsService'
@@ -1771,102 +1771,108 @@ function registerIpcHandlers() {
   ipcMain.handle('imageKey:getImageKeys', async (event, userDir: string) => {
     logService?.info('ImageKey', '开始获取图片密钥（DLL 本地扫描模式）', { userDir })
     try {
-      // 初始化 DLL
-      const initSuccess = await wxKeyService.initialize()
-      if (!initSuccess) {
-        logService?.error('ImageKey', 'DLL 初始化失败')
-        return { success: false, error: 'wx_key.dll 未加载，请确认 DLL 存在' }
-      }
-
-      event.sender.send('imageKey:progress', '正在从缓存目录扫描图片密钥...')
-
-      // 调用 DLL 的 GetImageKey
-      // DLL 会从 kvcomm 缓存目录获取 code（这部分始终正确）
-      // 但 DLL 的 wxid 发现只搜索固定默认路径，用户自定义存储位置时会找错
-      const dllResult = wxKeyService.getImageKey()
-      if (!dllResult.success || !dllResult.json) {
-        logService?.error('ImageKey', 'DLL GetImageKey 失败', { error: dllResult.error })
-        return { success: false, error: dllResult.error || '获取图片密钥失败' }
-      }
-
-      // 解析 JSON 结果
-      let parsed: any
-      try {
-        parsed = JSON.parse(dllResult.json)
-      } catch {
-        logService?.error('ImageKey', '解析 DLL 返回数据失败', { json: dllResult.json.substring(0, 200) })
-        return { success: false, error: '解析密钥数据失败' }
-      }
-
-      // 从任意账号提取 code 列表（code 来自 kvcomm，与 wxid 无关，所有账号都一样）
-      const accounts: any[] = parsed.accounts ?? []
-      if (!accounts.length || !accounts[0]?.keys?.length) {
-        return { success: false, error: '未找到有效的密钥码（kvcomm 缓存为空）' }
-      }
-
-      const codes: number[] = accounts[0].keys.map((k: any) => k.code)
-      logService?.info('ImageKey', `提取到 ${codes.length} 个密钥码`, {
-        codes,
-        dllFoundWxids: accounts.map((a: any) => a.wxid)
-      })
-
-      // 从 userDir 提取前端已配置好的正确 wxid
-      // 格式: "D:\weixin\xwechat_files\wxid_xxx" → "wxid_xxx"
-      let targetWxid = ''
-      if (userDir) {
-        const dirName = userDir.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? ''
-        if (dirName.startsWith('wxid_')) {
-          targetWxid = dirName
+      // ========== 方案一：DLL 本地扫描（优先） ==========
+      const dllResult = await (async () => {
+        const initSuccess = await wxKeyService.initialize()
+        if (!initSuccess) {
+          logService?.warn('ImageKey', 'DLL 初始化失败，将尝试内存扫描兜底')
+          return null
         }
+
+        event.sender.send('imageKey:progress', '正在从缓存目录扫描图片密钥...')
+
+        const result = wxKeyService.getImageKey()
+        if (!result.success || !result.json) {
+          logService?.warn('ImageKey', 'DLL GetImageKey 失败，将尝试内存扫描兜底', { error: result.error })
+          return null
+        }
+
+        let parsed: any
+        try {
+          parsed = JSON.parse(result.json)
+        } catch {
+          logService?.warn('ImageKey', '解析 DLL 返回数据失败，将尝试内存扫描兜底')
+          return null
+        }
+
+        const accounts: any[] = parsed.accounts ?? []
+        if (!accounts.length || !accounts[0]?.keys?.length) {
+          logService?.warn('ImageKey', 'DLL 未返回有效密钥码，将尝试内存扫描兜底')
+          return null
+        }
+
+        const codes: number[] = accounts[0].keys.map((k: any) => k.code)
+        logService?.info('ImageKey', `DLL 提取到 ${codes.length} 个密钥码`, {
+          codes,
+          dllFoundWxids: accounts.map((a: any) => a.wxid)
+        })
+
+        // 从 userDir 提取前端已配置好的正确 wxid
+        let targetWxid = ''
+        if (userDir) {
+          const dirName = userDir.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? ''
+          if (dirName.startsWith('wxid_')) {
+            targetWxid = dirName
+          }
+        }
+
+        if (!targetWxid) {
+          targetWxid = accounts[0].wxid
+          logService?.warn('ImageKey', '无法从 userDir 提取 wxid，使用 DLL 发现的', { targetWxid })
+        }
+
+        // CleanWxid: 截断到第二个下划线
+        const cleanWxid = (wxid: string): string => {
+          const first = wxid.indexOf('_')
+          if (first === -1) return wxid
+          const second = wxid.indexOf('_', first + 1)
+          if (second === -1) return wxid
+          return wxid.substring(0, second)
+        }
+        const cleanedWxid = cleanWxid(targetWxid)
+
+        const crypto = require('crypto')
+        const code = codes[0]
+        const xorKey = code & 0xFF
+        const dataToHash = code.toString() + cleanedWxid
+        const md5Full = crypto.createHash('md5').update(dataToHash).digest('hex')
+        const aesKey = md5Full.substring(0, 16)
+
+        event.sender.send('imageKey:progress', `密钥获取成功 (wxid: ${targetWxid}, code: ${code})`)
+        logService?.info('ImageKey', '图片密钥获取成功（DLL 模式）', { wxid: targetWxid, code, xorKey, aesKey })
+
+        return { success: true as const, xorKey, aesKey }
+      })()
+
+      if (dllResult) return dllResult
+
+      // ========== 方案二：内存扫描兜底 ==========
+      logService?.info('ImageKey', '切换到内存扫描兜底方案', { userDir })
+      event.sender.send('imageKey:progress', 'DLL 方式失败，正在尝试内存扫描方式...')
+
+      const wechatPid = wxKeyService.getWeChatPid()
+      if (!wechatPid) {
+        return { success: false, error: '获取图片密钥失败：DLL 扫描失败且未检测到微信进程（内存扫描需要微信正在运行）' }
       }
 
-      if (!targetWxid) {
-        // 无法从 userDir 提取 wxid，回退到 DLL 发现的第一个
-        targetWxid = accounts[0].wxid
-        logService?.warn('ImageKey', '无法从 userDir 提取 wxid，使用 DLL 发现的', { targetWxid })
+      logService?.info('ImageKey', '检测到微信进程，开始内存扫描', { pid: wechatPid })
+
+      const memResult = await imageKeyService.getImageKeys(
+        userDir,
+        wechatPid,
+        (msg) => event.sender.send('imageKey:progress', msg)
+      )
+
+      if (memResult.success) {
+        logService?.info('ImageKey', '图片密钥获取成功（内存扫描兜底）', {
+          xorKey: memResult.xorKey,
+          aesKey: memResult.aesKey
+        })
+      } else {
+        logService?.error('ImageKey', '内存扫描兜底也失败', { error: memResult.error })
       }
 
-      // CleanWxid: 与 xkey 保持一致，截断到第二个下划线
-      // wxid_g4pshorcc0r529_da6c → wxid_g4pshorcc0r529
-      // wxid_7x2qsltkns1m22 → wxid_7x2qsltkns1m22（不变，只有两段）
-      const cleanWxid = (wxid: string): string => {
-        const first = wxid.indexOf('_')
-        if (first === -1) return wxid
-        const second = wxid.indexOf('_', first + 1)
-        if (second === -1) return wxid
-        return wxid.substring(0, second)
-      }
-      const cleanedWxid = cleanWxid(targetWxid)
-
-      logService?.info('ImageKey', 'wxid 处理', {
-        original: targetWxid,
-        cleaned: cleanedWxid
-      })
-
-      // 用 cleanedWxid + code 计算密钥（与 xkey 算法一致）
-      // xorKey = code & 0xFF
-      // aesKey = MD5(code.toString() + cleanedWxid).substring(0, 16)
-      const crypto = require('crypto')
-      const code = codes[0]
-      const xorKey = code & 0xFF
-      const dataToHash = code.toString() + cleanedWxid
-      const md5Full = crypto.createHash('md5').update(dataToHash).digest('hex')
-      const aesKey = md5Full.substring(0, 16)
-
-      event.sender.send('imageKey:progress', `密钥获取成功 (wxid: ${targetWxid}, code: ${code})`)
-
-      logService?.info('ImageKey', '图片密钥获取成功', {
-        wxid: targetWxid,
-        code,
-        xorKey,
-        aesKey
-      })
-
-      return {
-        success: true,
-        xorKey,
-        aesKey
-      }
+      return memResult
     } catch (e) {
       logService?.error('ImageKey', '图片密钥获取异常', { error: String(e) })
       return { success: false, error: String(e) }
